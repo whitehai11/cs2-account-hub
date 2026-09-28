@@ -9,6 +9,8 @@
     <UseWinUI>true</UseWinUI>
     <WindowsPackageType>None</WindowsPackageType>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <SelfContained>true</SelfContained>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
@@ -17,4 +19,10 @@
     <ProjectReference Include="..\Shared\CS2AccountHub.Contracts.csproj" />
     <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.2.1" />
   </ItemGroup>
+
+  <Target Name="IncludeWinUIPriInPublish" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish Include="$(TargetDir)$(TargetName).pri" RelativePath="$(TargetName).pri" CopyToPublishDirectory="PreserveNewest" />
+    </ItemGroup>
+  </Target>
 </Project>
