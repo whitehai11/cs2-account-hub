@@ -1,0 +1,67 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows-artifacts:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.x
+
+      - name: Publish Windows bridge
+        run: dotnet publish src/WindowsBridge/CS2AccountHub.WindowsBridge.csproj -c Release -r win-x64 --self-contained true -o artifacts/windows-bridge
+
+      - name: Publish desktop client
+        run: dotnet publish src/Desktop/CS2AccountHub.Desktop.csproj -c Release -r win-x64 --self-contained true -o artifacts/desktop
+
+      - name: Package Windows artifacts
+        shell: pwsh
+        run: |
+          Compress-Archive -Path artifacts/windows-bridge/* -DestinationPath "CS2AccountHub-WindowsBridge-${env:GITHUB_REF_NAME}.zip"
+          Compress-Archive -Path artifacts/desktop/* -DestinationPath "CS2AccountHub-Desktop-${env:GITHUB_REF_NAME}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-release-assets
+          path: |
+            CS2AccountHub-WindowsBridge-${{ github.ref_name }}.zip
+            CS2AccountHub-Desktop-${{ github.ref_name }}.zip
+
+  backend-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build backend image
+        run: docker build -t cs2-account-hub:${GITHUB_REF_NAME} .
+
+      - name: Save backend image
+        run: docker save cs2-account-hub:${GITHUB_REF_NAME} | gzip > "CS2AccountHub-Backend-${GITHUB_REF_NAME}.tar.gz"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backend-release-asset
+          path: CS2AccountHub-Backend-${{ github.ref_name }}.tar.gz
+
+  github-release:
+    needs: [windows-artifacts, backend-release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: release-assets/*

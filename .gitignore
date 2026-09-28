@@ -1,0 +1,11 @@
+bin/
+obj/
+.vs/
+.idea/
+artifacts/
+data/
+*.user
+*.suo
+*.pdb
+*.userprefs
+.env

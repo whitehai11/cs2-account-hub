@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.x
+      - run: dotnet restore src/Backend/CS2AccountHub.Backend.csproj
+      - run: dotnet build src/Backend/CS2AccountHub.Backend.csproj --configuration Release --no-restore
+
+  build-windows-bridge:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.x
+      - run: dotnet restore src/WindowsBridge/CS2AccountHub.WindowsBridge.csproj
+      - run: dotnet build src/WindowsBridge/CS2AccountHub.WindowsBridge.csproj --configuration Release --no-restore
+
+  build-desktop:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.x
+      - run: dotnet restore src/Desktop/CS2AccountHub.Desktop.csproj
+      - run: dotnet build src/Desktop/CS2AccountHub.Desktop.csproj --configuration Release --no-restore
+
+  validate-solution:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --tag cs2-account-hub:ci .
