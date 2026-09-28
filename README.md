@@ -28,6 +28,14 @@ dotnet build .\CS2AccountHub.sln
 CS2_HUB_API_KEY='replace-with-a-long-random-value' docker compose up --build
 ```
 
+The compose file expects the external Docker network `npm_default` used by Nginx Proxy Manager and publishes the backend on host port `18080`. Create the network once if it does not exist:
+
+```bash
+docker network create npm_default
+```
+
+Nginx Proxy Manager can then proxy to `backend:8080` on the `npm_default` network, or to the host on port `18080`.
+
 Never commit real Steam passwords, Steam Guard codes, refresh tokens, or production encryption keys.
 
 The API key is required by the Docker deployment and must also be configured in the desktop client's `CS2_HUB_API_KEY` environment variable. Set `CS2_HUB_API_URL` on the desktop to the public HTTPS URL of the server.
