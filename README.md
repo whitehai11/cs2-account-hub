@@ -38,7 +38,7 @@ Nginx Proxy Manager can then proxy to `backend:8080` on the `npm_default` networ
 
 Never commit real Steam passwords, Steam Guard codes, refresh tokens, or production encryption keys.
 
-The API key is required by the Docker deployment and must also be configured in the desktop client's `CS2_HUB_API_KEY` environment variable. Set `CS2_HUB_API_URL` on the desktop to the public HTTPS URL of the server.
+The API key is required by the Docker deployment and must also be configured in the desktop client's `CS2_HUB_API_KEY` environment variable. The desktop defaults to `https://cs2api.infra-maro.com`; set `CS2_HUB_API_URL` only when using another endpoint.
 
 ## CI and releases
 

@@ -9,7 +9,7 @@ internal sealed class ApiClient
 
     public ApiClient()
     {
-        var baseUrl = Environment.GetEnvironmentVariable("CS2_HUB_API_URL") ?? "http://localhost:8080";
+        var baseUrl = Environment.GetEnvironmentVariable("CS2_HUB_API_URL") ?? "https://cs2api.infra-maro.com";
         _http = new HttpClient { BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/") };
         var apiKey = Environment.GetEnvironmentVariable("CS2_HUB_API_KEY");
         if (!string.IsNullOrWhiteSpace(apiKey)) _http.DefaultRequestHeaders.Add("X-CS2-Hub-Key", apiKey);
