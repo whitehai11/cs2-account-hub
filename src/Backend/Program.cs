@@ -267,6 +267,7 @@ public sealed record WebLoginRequest(string Username, string Password);
 
 internal static class RequestValidation
 {
+    private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
     public static bool IsValidWebLogin(WebLoginRequest request) =>
         IsText(request.Username, 1, 128) && IsText(request.Password, 1, 512);
 
@@ -330,9 +331,9 @@ internal static class RequestValidation
         {
             value = payload switch
             {
-                JsonElement element => element.Deserialize<T>(),
+                JsonElement element => element.Deserialize<T>(WebJson),
                 null => default,
-                _ => JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(payload)),
+                _ => JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(payload, WebJson), WebJson),
             };
             return value is not null;
         }

@@ -63,6 +63,14 @@ button:hover .button-arrow { transform: translateX(3px); }
 .brand small { display: block; margin-top: 2px; color: #7188a7; font-size: 9px; letter-spacing: .12em; }
 .sidebar nav { display: grid; gap: 6px; }
 .nav-item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; border-color: transparent; background: transparent; color: #8fa2bd; text-align: left; }
+.nav-icon { position: relative; width: 17px; height: 17px; display: inline-block; flex: none; opacity: .8; }
+.nav-icon-ready { border: 1.5px solid currentColor; border-radius: 5px; }
+.nav-icon-ready::after { content: ""; position: absolute; width: 6px; height: 3px; left: 4px; top: 5px; border-left: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); }
+.nav-icon-alert { border: 1.5px solid currentColor; border-radius: 50%; }
+.nav-icon-alert::after { content: ""; position: absolute; width: 1.5px; height: 6px; left: 7px; top: 3px; background: currentColor; box-shadow: 0 8px currentColor; }
+.nav-icon-loadout { border: 1.5px solid currentColor; border-radius: 4px; background: linear-gradient(currentColor,currentColor) 4px 4px/8px 1px no-repeat, linear-gradient(currentColor,currentColor) 4px 8px/8px 1px no-repeat, linear-gradient(currentColor,currentColor) 4px 12px/8px 1px no-repeat; }
+.nav-icon-profile { border: 1.5px solid currentColor; border-radius: 50% 50% 45% 45%; }
+.nav-icon-profile::after { content: ""; position: absolute; width: 5px; height: 5px; left: 4px; top: 3px; border: 1.5px solid currentColor; border-radius: 50%; }
 .nav-item:hover { background: rgba(45, 69, 103, .35); color: var(--text); }
 .nav-item.active { border-color: rgba(75, 156, 255, .22); background: linear-gradient(90deg, rgba(75,156,255,.18), rgba(75,156,255,.04)); color: #a9d0ff; box-shadow: inset 3px 0 var(--blue); }
 .sidebar-bottom { margin-top: auto; display: grid; gap: 13px; }

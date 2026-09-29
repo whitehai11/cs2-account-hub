@@ -5,6 +5,7 @@ using NfaLoader.Services;
 
 internal sealed class SteamGateway : ISteamAccountGateway
 {
+    private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
     private readonly SteamCredentialsAuthService _auth = new();
     private readonly CsPremierScoreService _status = new();
     private readonly SteamPrimeStatusService _prime = new();
@@ -135,9 +136,9 @@ internal sealed class SteamGateway : ISteamAccountGateway
         if (payload is null) return default;
         if (payload is JsonElement element)
         {
-            return element.Deserialize<T>();
+            return element.Deserialize<T>(WebJson);
         }
 
-        return JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(payload));
+        return JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(payload, WebJson), WebJson);
     }
 }
