@@ -54,7 +54,7 @@ The browser dashboard contains Play Ready and Not Play Ready account lists, Prim
 
 Cooldown notifications are optional. Set `CS2_HUB_DISCORD_WEBHOOK_URL` only in the server's `.env`; the worker sends one notification when the estimated cooldown end is reached and persists the sent state. Never commit or paste a webhook URL into GitHub or chat. If a webhook URL is exposed, revoke it in Discord immediately and create a new one.
 
-Status checks are staggered per account by default. `CS2_HUB_CHECK_INTERVAL_MINUTES` controls the minimum interval (default `30`, allowed range `5` to `1440`); each account receives a stable time offset and checks run through one server-side queue to avoid CM bursts and unnecessary 429 responses.
+Status checks are staggered per account by default. `CS2_HUB_CHECK_INTERVAL_MINUTES` controls the base interval (default `30`, allowed range `5` to `1440`); each account receives a stable time offset and checks run through one server-side queue to avoid CM bursts and unnecessary 429 responses.
 
 ## CI and releases
 
