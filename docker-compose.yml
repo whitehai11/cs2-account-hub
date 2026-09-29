@@ -3,7 +3,14 @@ services:
     build: .
     restart: unless-stopped
     ports:
-      - "18080:8080"
+      - "127.0.0.1:18080:8080"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 768m
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       CS2_HUB_DATA_DIR: /data

@@ -14,6 +14,8 @@ The server owns the dashboard login, Steam authentication, Steam Guard code flow
 
 Accounts are persisted in `/data`, while refresh tokens are protected with ASP.NET Data Protection keys also stored in `/data/keys`. Keep the Docker volume and API key private. Passwords and Steam Guard codes are accepted only in memory during the authentication request and are never written to the account database or logs.
 
+The dashboard uses a four-hour, `HttpOnly`, `Secure`, `SameSite=Strict` session cookie. Sessions are invalidated automatically when the configured dashboard username or password changes. The API has request-size limits, per-IP rate limits, strict security headers, no cross-origin browser access, and does not expose refresh tokens or the legacy local Steam handoff.
+
 The classification is deliberately conservative: an account is `PlayReady` only when the GC returned cooldown data, VAC is explicitly clear and no cooldown is active. Unknown status stays `NotPlayReady` until a refresh confirms it.
 
 ## Build
@@ -30,6 +32,7 @@ CS2_HUB_API_KEY=replace-with-a-long-random-value
 CS2_HUB_WEB_USERNAME=admin
 CS2_HUB_WEB_PASSWORD=replace-with-a-long-dashboard-password
 EOF
+chmod 600 .env
 docker compose up --build -d
 ```
 
@@ -39,11 +42,13 @@ The compose file expects the external Docker network `npm_default` used by Nginx
 docker network create npm_default
 ```
 
-Nginx Proxy Manager can then proxy to `backend:8080` on the `npm_default` network, or to the host on port `18080`.
+Nginx Proxy Manager should proxy to `backend:8080` on the `npm_default` network. Port `18080` remains available on localhost for diagnostics but is no longer published to the public network. Keep HTTPS enabled at the proxy; the dashboard cookie is intentionally HTTPS-only.
 
 Never commit real Steam passwords, Steam Guard codes, refresh tokens, or production encryption keys.
 
 Open `https://cs2api.infra-maro.com` after the container is running and use `CS2_HUB_WEB_USERNAME` / `CS2_HUB_WEB_PASSWORD` for the dashboard. The API key remains available for compatible automation and the legacy desktop client; the browser uses the protected web session cookie instead. Steam accounts are added from the web dashboard with their Steam username/password, followed by manual Steam Guard or e-mail confirmation when requested.
+
+Use new random values when rotating access: edit `.env`, then run `docker compose up -d --force-recreate`. Changing the dashboard password invalidates existing web sessions; changing the API key immediately invalidates API-key clients. Do not put either value in GitHub issues, browser URLs, logs or screenshots.
 
 The browser dashboard contains Play Ready and Not Play Ready account lists, Prime filters, status refresh, Workshop clearing, server-side Loadout and Personalize presets, account notes and operation confirmations. AutoExec is intentionally not part of the application.
 

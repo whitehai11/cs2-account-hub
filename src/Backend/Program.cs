@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Security.Cryptography;
+using System.Threading.RateLimiting;
 using CS2AccountHub.Contracts;
 using Microsoft.AspNetCore.DataProtection;
 
@@ -12,7 +13,6 @@ Directory.CreateDirectory(dataDirectory);
 builder.Services.AddSingleton<AccountStore>();
 builder.Services.AddSingleton<SettingsStore>();
 builder.Services.AddSingleton<OperationStore>();
-builder.Services.AddSingleton<HandoffStore>();
 builder.Services.AddSingleton<AuthSessionStore>();
 builder.Services.AddSingleton<OperationQueue>();
 builder.Services.AddDataProtection()
@@ -22,25 +22,69 @@ builder.Services.AddSingleton<TokenProtector>();
 builder.Services.AddSingleton<WebSessionService>();
 builder.Services.AddSingleton<ISteamAccountGateway, SteamGateway>();
 builder.Services.AddHostedService<OperationWorker>();
-
-builder.Services.AddCors(options =>
+builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 3 * 1024 * 1024);
+builder.Services.AddRateLimiter(options =>
 {
-    options.AddDefaultPolicy(policy => policy
-        .AllowAnyHeader()
-        .AllowAnyMethod()
-        .AllowCredentials()
-        .SetIsOriginAllowed(_ => true));
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 180,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true,
+            }));
+    options.AddPolicy("web-login", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 8,
+            Window = TimeSpan.FromMinutes(5),
+            QueueLimit = 0,
+            AutoReplenishment = true,
+        }));
+    options.AddPolicy("steam-auth", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 6,
+            Window = TimeSpan.FromMinutes(5),
+            QueueLimit = 0,
+            AutoReplenishment = true,
+        }));
 });
 
 var app = builder.Build();
 var apiKey = Environment.GetEnvironmentVariable("CS2_HUB_API_KEY");
 var webSessions = app.Services.GetRequiredService<WebSessionService>();
+app.Use(async (context, next) =>
+{
+    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+    context.Response.Headers["X-Frame-Options"] = "DENY";
+    context.Response.Headers["Referrer-Policy"] = "no-referrer";
+    context.Response.Headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()";
+    context.Response.Headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'";
+    context.Response.Headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
+    if (context.Request.Path.StartsWithSegments("/api"))
+    {
+        context.Response.Headers["Cache-Control"] = "no-store";
+    }
+
+    await next();
+});
 app.UseDefaultFiles();
 app.UseStaticFiles();
+app.UseRouting();
+app.UseRateLimiter();
 app.Use(async (context, next) =>
 {
     var isApiRequest = context.Request.Path.StartsWithSegments("/api");
-    var isWebAuthRequest = context.Request.Path.StartsWithSegments("/api/web");
+    var requestPath = context.Request.Path.Value;
+    var isWebAuthRequest = string.Equals(requestPath, "/api/web/login", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(requestPath, "/api/web/me", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(requestPath, "/api/web/logout", StringComparison.OrdinalIgnoreCase);
     var apiKeyAccepted = !string.IsNullOrWhiteSpace(apiKey)
         && context.Request.Headers.TryGetValue("X-CS2-Hub-Key", out var supplied)
         && CryptographicOperations.FixedTimeEquals(
@@ -55,12 +99,16 @@ app.Use(async (context, next) =>
 
     await next();
 });
-app.UseCors();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
 app.MapPost("/api/web/login", (WebLoginRequest request, WebSessionService sessions, HttpResponse response) =>
 {
+    if (!RequestValidation.IsValidWebLogin(request))
+    {
+        return Results.BadRequest(new { message = "Invalid dashboard credentials format." });
+    }
+
     var expectedUser = Environment.GetEnvironmentVariable("CS2_HUB_WEB_USERNAME");
     var expectedPassword = Environment.GetEnvironmentVariable("CS2_HUB_WEB_PASSWORD");
     if (string.IsNullOrWhiteSpace(expectedUser) || string.IsNullOrWhiteSpace(expectedPassword) ||
@@ -72,7 +120,7 @@ app.MapPost("/api/web/login", (WebLoginRequest request, WebSessionService sessio
 
     sessions.SignIn(response, request.Username.Trim());
     return Results.Ok(new { authenticated = true, username = request.Username.Trim() });
-});
+}).RequireRateLimiting("web-login");
 
 app.MapGet("/api/web/me", (WebSessionService sessions, HttpContext context) =>
 {
@@ -104,6 +152,7 @@ app.MapGet("/api/accounts/{id:guid}", (Guid id, AccountStore store) =>
 
 app.MapPatch("/api/accounts/{id:guid}/note", (Guid id, UpdateNoteRequest request, AccountStore store) =>
 {
+    if (!RequestValidation.IsValidNote(request)) return Results.BadRequest(new { message = "The note is too long." });
     return store.UpdateNote(id, request.Note)
         ? Results.NoContent()
         : Results.NotFound();
@@ -119,12 +168,14 @@ app.MapPatch("/api/accounts/{id:guid}/prime", (Guid id, SetPrimeRequest request,
 app.MapGet("/api/settings/loadout", (SettingsStore settings) => Results.Ok(settings.GetLoadout()));
 app.MapPut("/api/settings/loadout", (LoadoutPresetDto request, SettingsStore settings) =>
 {
+    if (!RequestValidation.IsValidLoadout(request)) return Results.BadRequest(new { message = "The loadout preset is invalid or too large." });
     settings.SetLoadout(request);
     return Results.NoContent();
 });
 app.MapGet("/api/settings/personalize", (SettingsStore settings) => Results.Ok(settings.GetPersonalize()));
 app.MapPut("/api/settings/personalize", (PersonalizePresetDto request, SettingsStore settings) =>
 {
+    if (!RequestValidation.IsValidPersonalize(request)) return Results.BadRequest(new { message = "The personalization preset is invalid or too large." });
     settings.SetPersonalize(request);
     return Results.NoContent();
 });
@@ -136,14 +187,14 @@ app.MapPost("/api/auth/sessions", async (
     ISteamAccountGateway gateway,
     CancellationToken cancellationToken) =>
 {
-    if (string.IsNullOrWhiteSpace(request.AccountName) || string.IsNullOrWhiteSpace(request.Password))
+    if (!RequestValidation.IsValidStartAuth(request))
     {
-        return Results.BadRequest(new { message = "Account name and password are required." });
+        return Results.BadRequest(new { message = "Account name and password are required and within the allowed length." });
     }
 
     var session = await sessions.StartAsync(request.AccountName.Trim(), request.Password, gateway, accounts, cancellationToken);
     return Results.Ok(new StartAuthResponse(session.Id, session.State, session.SteamId, session.PromptMessage));
-});
+}).RequireRateLimiting("steam-auth");
 
 app.MapGet("/api/auth/sessions/{id:guid}", (Guid id, AuthSessionStore sessions) =>
 {
@@ -161,31 +212,19 @@ app.MapPost("/api/auth/sessions/{id:guid}/code", async (
     ISteamAccountGateway gateway,
     CancellationToken cancellationToken) =>
 {
-    if (string.IsNullOrWhiteSpace(request.Code))
+    if (!RequestValidation.IsValidGuardCode(request))
     {
         return Results.BadRequest(new { message = "A Steam Guard code is required." });
     }
 
     var result = await sessions.SubmitCodeAsync(id, request.Code.Trim(), gateway, accounts, cancellationToken);
     return result is null ? Results.NotFound() : Results.Ok(result);
-});
+}).RequireRateLimiting("steam-auth");
 
 app.MapGet("/api/operations/{id:guid}", (Guid id, OperationStore operations) =>
 {
     var operation = operations.Get(id);
     return operation is null ? Results.NotFound() : Results.Ok(OperationMappings.ToDto(operation));
-});
-
-app.MapGet("/api/operations/{id:guid}/handoff", (Guid id, OperationStore operations, HandoffStore handoffs) =>
-{
-    var operation = operations.Get(id);
-    if (operation is null || operation.Command != AccountCommand.SignInToSteam || operation.State != OperationState.Succeeded)
-    {
-        return Results.NotFound();
-    }
-
-    var handoff = handoffs.Consume(id);
-    return handoff is null ? Results.NotFound() : Results.Ok(handoff);
 });
 
 app.MapPost("/api/accounts/{id:guid}/commands", async (
@@ -195,6 +234,16 @@ app.MapPost("/api/accounts/{id:guid}/commands", async (
     OperationStore operations,
     OperationQueue queue) =>
 {
+    if (request.Command == AccountCommand.SignInToSteam)
+    {
+        return Results.BadRequest(new { message = "Local Steam sign-in handoff is disabled. Use the web Steam login." });
+    }
+
+    if (!RequestValidation.IsValidCommand(request))
+    {
+        return Results.BadRequest(new { message = "The command payload is invalid or too large." });
+    }
+
     if (accounts.Get(id) is null)
     {
         return Results.NotFound();
@@ -205,16 +254,96 @@ app.MapPost("/api/accounts/{id:guid}/commands", async (
     return Results.Accepted($"/api/operations/{operation.Id}", OperationMappings.ToDto(operation));
 });
 
+app.MapGet("/api/{**path}", () => Results.NotFound());
 app.MapFallbackToFile("index.html");
 
 app.Run();
 
 public sealed record WebLoginRequest(string Username, string Password);
 
+internal static class RequestValidation
+{
+    public static bool IsValidWebLogin(WebLoginRequest request) =>
+        IsText(request.Username, 1, 128) && IsText(request.Password, 1, 512);
+
+    public static bool IsValidStartAuth(StartAuthRequest request) =>
+        IsText(request.AccountName, 1, 128) && IsText(request.Password, 1, 512);
+
+    public static bool IsValidGuardCode(SubmitGuardCodeRequest request) =>
+        IsText(request.Code, 1, 32);
+
+    public static bool IsValidNote(UpdateNoteRequest request) =>
+        request.Note is null || request.Note.Length <= 1000;
+
+    public static bool IsValidLoadout(LoadoutPresetDto request) =>
+        IsText(request.Name, 1, 64) && IsValidSlots(request.T) && IsValidSlots(request.Ct);
+
+    public static bool IsValidPersonalize(PersonalizePresetDto request) =>
+        IsOptionalText(request.PersonaName, 128) &&
+        IsOptionalText(request.RealName, 128) &&
+        IsOptionalText(request.Summary, 512) &&
+        IsValidAvatar(request.AvatarBase64);
+
+    public static bool IsValidCommand(CommandRequest request)
+    {
+        return request.Command switch
+        {
+            AccountCommand.RefreshStatus or AccountCommand.ClearWorkshop => IsEmptyPayload(request.Payload),
+            AccountCommand.ApplyLoadout => TryDeserialize(request.Payload, out LoadoutPresetDto? loadout) && loadout is not null && IsValidLoadout(loadout),
+            AccountCommand.Personalize => TryDeserialize(request.Payload, out PersonalizePresetDto? personalize) && personalize is not null && IsValidPersonalize(personalize),
+            _ => false,
+        };
+    }
+
+    private static bool IsText(string? value, int minimum, int maximum) =>
+        value is not null && value.Trim().Length >= minimum && value.Length <= maximum;
+
+    private static bool IsOptionalText(string? value, int maximum) => value is null || value.Length <= maximum;
+
+    private static bool IsValidSlots(IReadOnlyDictionary<uint, uint>? slots) =>
+        slots is not null && slots.Count <= 64 && slots.All(entry => entry.Key <= 1000 && entry.Value <= 1000);
+
+    private static bool IsEmptyPayload(object? payload) =>
+        payload is null || payload is JsonElement element && element.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined;
+
+    private static bool IsValidAvatar(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return true;
+        if (value.Length > 2_800_000) return false;
+        try
+        {
+            return Convert.FromBase64String(value).Length <= 2 * 1024 * 1024;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryDeserialize<T>(object? payload, out T? value)
+    {
+        try
+        {
+            value = payload switch
+            {
+                JsonElement element => element.Deserialize<T>(),
+                null => default,
+                _ => JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(payload)),
+            };
+            return value is not null;
+        }
+        catch (JsonException)
+        {
+            value = default;
+            return false;
+        }
+    }
+}
+
 internal sealed class WebSessionService
 {
     public const string CookieName = "cs2hub_session";
-    private static readonly TimeSpan Lifetime = TimeSpan.FromHours(8);
+    private static readonly TimeSpan Lifetime = TimeSpan.FromHours(4);
     private readonly IDataProtector _protector;
 
     public WebSessionService(IDataProtectionProvider provider)
@@ -225,14 +354,14 @@ internal sealed class WebSessionService
     public void SignIn(HttpResponse response, string username)
     {
         var expires = DateTimeOffset.UtcNow.Add(Lifetime);
-        var secureCookie = !string.Equals(Environment.GetEnvironmentVariable("CS2_HUB_COOKIE_SECURE"), "false", StringComparison.OrdinalIgnoreCase);
-        var value = _protector.Protect($"{username}\n{expires.ToUnixTimeSeconds()}");
+        var value = _protector.Protect($"{username}\n{expires.ToUnixTimeSeconds()}\n{GetPasswordVersion()}");
         response.Cookies.Append(CookieName, value, new CookieOptions
         {
             HttpOnly = true,
-            Secure = secureCookie,
-            SameSite = SameSiteMode.Lax,
+            Secure = true,
+            SameSite = SameSiteMode.Strict,
             Expires = expires,
+            MaxAge = Lifetime,
             IsEssential = true,
         });
     }
@@ -240,8 +369,8 @@ internal sealed class WebSessionService
     public void SignOut(HttpResponse response) => response.Cookies.Delete(CookieName, new CookieOptions
     {
         HttpOnly = true,
-        Secure = !string.Equals(Environment.GetEnvironmentVariable("CS2_HUB_COOKIE_SECURE"), "false", StringComparison.OrdinalIgnoreCase),
-        SameSite = SameSiteMode.Lax,
+        Secure = true,
+        SameSite = SameSiteMode.Strict,
         IsEssential = true,
     });
 
@@ -256,16 +385,19 @@ internal sealed class WebSessionService
 
         try
         {
-            var parts = _protector.Unprotect(value).Split('\n', 2);
-            if (parts.Length != 2 || !long.TryParse(parts[1], out var expiry) ||
-                expiry <= DateTimeOffset.UtcNow.ToUnixTimeSeconds() || string.IsNullOrWhiteSpace(parts[0]))
+            var parts = _protector.Unprotect(value).Split('\n', 3);
+            var expectedUsername = Environment.GetEnvironmentVariable("CS2_HUB_WEB_USERNAME");
+            if (parts.Length != 3 || !long.TryParse(parts[1], out var expiry) ||
+                expiry <= DateTimeOffset.UtcNow.ToUnixTimeSeconds() || string.IsNullOrWhiteSpace(parts[0]) ||
+                !ConstantTimeEquals(parts[0], expectedUsername) ||
+                !ConstantTimeEquals(parts[2], GetPasswordVersion()))
             {
                 return null;
             }
 
             return parts[0];
         }
-        catch (CryptographicException)
+        catch (Exception exception) when (exception is CryptographicException or FormatException or ArgumentException)
         {
             return null;
         }
@@ -277,6 +409,14 @@ internal sealed class WebSessionService
         var leftBytes = System.Text.Encoding.UTF8.GetBytes(left);
         var rightBytes = System.Text.Encoding.UTF8.GetBytes(right);
         return leftBytes.Length == rightBytes.Length && CryptographicOperations.FixedTimeEquals(leftBytes, rightBytes);
+    }
+
+    private static string GetPasswordVersion()
+    {
+        var password = Environment.GetEnvironmentVariable("CS2_HUB_WEB_PASSWORD");
+        return password is null
+            ? string.Empty
+            : Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(password)));
     }
 }
 
@@ -303,7 +443,7 @@ internal sealed class AccountStore
         }
         catch (Exception exception)
         {
-            Console.Error.WriteLine($"Could not load account state: {exception.Message}");
+            Console.Error.WriteLine($"Could not load account state ({exception.GetType().Name}).");
         }
     }
 
@@ -404,16 +544,14 @@ internal sealed class OperationWorker : BackgroundService
     private readonly OperationStore _operations;
     private readonly AccountStore _accounts;
     private readonly ISteamAccountGateway _gateway;
-    private readonly HandoffStore _handoffs;
     private readonly ILogger<OperationWorker> _logger;
 
-    public OperationWorker(OperationQueue queue, OperationStore operations, AccountStore accounts, ISteamAccountGateway gateway, HandoffStore handoffs, ILogger<OperationWorker> logger)
+    public OperationWorker(OperationQueue queue, OperationStore operations, AccountStore accounts, ISteamAccountGateway gateway, ILogger<OperationWorker> logger)
     {
         _queue = queue;
         _operations = operations;
         _accounts = accounts;
         _gateway = gateway;
-        _handoffs = handoffs;
         _logger = logger;
     }
 
@@ -429,15 +567,6 @@ internal sealed class OperationWorker : BackgroundService
             {
                 var account = _accounts.Get(operation.AccountId)
                     ?? throw new InvalidOperationException("Account no longer exists.");
-
-                if (operation.Command == AccountCommand.SignInToSteam)
-                {
-                    _handoffs.Create(operation.Id, account);
-                    operation.HandoffReady = true;
-                    operation.State = OperationState.Succeeded;
-                    operation.Message = "One-time Steam sign-in handoff is ready for the Windows bridge.";
-                    continue;
-                }
 
                 var result = await _gateway.ExecuteAsync(account, operation.Command, operation.Payload, stoppingToken);
                 if (result.Status is not null)
@@ -457,8 +586,8 @@ internal sealed class OperationWorker : BackgroundService
             catch (Exception ex)
             {
                 operation.State = OperationState.Failed;
-                operation.Message = ex.Message;
-                _logger.LogError(ex, "Operation {OperationId} failed", operation.Id);
+                operation.Message = "The operation failed. Check the server logs for details.";
+                _logger.LogError("Operation {OperationId} failed with {ExceptionType}.", operation.Id, ex.GetType().Name);
             }
             finally
             {
@@ -567,10 +696,10 @@ internal sealed class AuthSessionStore
             session.State = AuthState.Failed;
             session.PromptMessage = "Authentication was cancelled.";
         }
-        catch (Exception exception)
+        catch (Exception)
         {
             session.State = AuthState.Failed;
-            session.PromptMessage = exception.Message;
+            session.PromptMessage = "Steam authentication failed. Check the account details and try again.";
         }
     }
 
@@ -663,54 +792,6 @@ internal sealed class OperationRecord
     public string? Message { get; set; }
     public DateTimeOffset CreatedUtc { get; }
     public DateTimeOffset? CompletedUtc { get; set; }
-    public bool HandoffReady { get; set; }
-}
-
-internal sealed class HandoffStore
-{
-    private readonly object _gate = new();
-    private readonly Dictionary<Guid, (SteamSignInHandoff Handoff, DateTimeOffset Expires)> _handoffs = new();
-    private readonly TokenProtector _tokens;
-
-    public HandoffStore(TokenProtector tokens)
-    {
-        _tokens = tokens;
-    }
-
-    public SteamSignInHandoff Create(Guid operationId, AccountRecord account)
-    {
-        if (string.IsNullOrWhiteSpace(account.ProtectedRefreshToken) || string.IsNullOrWhiteSpace(account.AccountName))
-        {
-            throw new InvalidOperationException("The account has no usable local Steam sign-in data.");
-        }
-
-        var expires = DateTimeOffset.UtcNow.AddMinutes(2);
-        var payload = new SteamSignInPayload(
-            account.AccountName,
-            account.SteamId,
-            _tokens.Unprotect(account.ProtectedRefreshToken));
-        var handoff = new SteamSignInHandoff(
-            operationId,
-            account.Id,
-            JsonSerializer.Serialize(payload),
-            expires);
-
-        lock (_gate) _handoffs[operationId] = (handoff, expires);
-        return handoff;
-    }
-
-    public SteamSignInHandoff? Consume(Guid operationId)
-    {
-        lock (_gate)
-        {
-            if (!_handoffs.Remove(operationId, out var entry) || entry.Expires <= DateTimeOffset.UtcNow)
-            {
-                return null;
-            }
-
-            return entry.Handoff;
-        }
-    }
 }
 
 internal static class OperationMappings
