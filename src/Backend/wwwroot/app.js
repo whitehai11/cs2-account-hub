@@ -23,6 +23,8 @@ function sectionName(value) { return enumName(value, ['PlayReady', 'NotPlayReady
 function healthLabel(value) { return value === 'healthy' ? 'GC gesund' : value === 'gc-unknown' ? 'GC unvollständig' : value?.startsWith('error:') ? 'GC-Fehler' : 'Noch nicht geprüft'; }
 function presenceLabel(account) { return account.inMatch === true ? 'In CS2-Match' : account.inMatch === false ? 'Nicht im Match' : 'Unbekannt'; }
 function formatDate(value) { return value ? new Date(value).toLocaleString('de-DE') : '—'; }
+function relativeTime(value) { if (!value) return '—'; const seconds = Math.round((new Date(value).getTime() - Date.now()) / 1000); if (Math.abs(seconds) < 60) return seconds >= 0 ? 'gleich' : 'gerade eben'; const minutes = Math.round(Math.abs(seconds) / 60); return seconds >= 0 ? `in ${minutes} Min.` : `vor ${minutes} Min.`; }
+function cooldownPhase(account) { if (account.cooldownSeconds == null && !account.cooldownEndsUtc) return 'Unbekannt'; if (remainingSeconds(account) > 0) return 'Aktiv'; return account.cooldownEndsUtc ? 'GC-Recheck fällig' : 'Bestätigt frei'; }
 function remainingSeconds(account) {
   if (account.cooldownEndsUtc) return Math.max(0, Math.floor((new Date(account.cooldownEndsUtc).getTime() - Date.now()) / 1000));
   return account.cooldownSeconds;
@@ -40,9 +42,11 @@ function avatarMarkup(account, size = '') {
     ? `<img class="avatar-image ${size}" src="${esc(account.avatarUrl)}" alt="">`
     : `<span class="avatar-fallback ${size}">${esc((account.personaName || '?').slice(0, 1).toUpperCase())}</span>`;
 }
-function showLogin() { $('appView').classList.add('hidden'); $('loginView').classList.remove('hidden'); }
+function showLogin() { $('appView').classList.add('hidden'); $('loginView').classList.remove('hidden'); setButtonBusy('dashboardLoginButton', false, 'Dashboard öffnen'); }
 function showApp(username) { $('loginView').classList.add('hidden'); $('appView').classList.remove('hidden'); $('userLabel').textContent = username || ''; }
 function toast(message, bad = false) { const el = $('toast'); el.textContent = message; el.classList.remove('hidden'); el.style.background = bad ? '#a52318' : '#17324d'; setTimeout(() => el.classList.add('hidden'), 4500); }
+function setButtonBusy(id, busy, label) { const button = $(id); if (!button) return; button.disabled = busy; button.querySelector('.button-spinner')?.classList.toggle('hidden', !busy); const text = button.querySelector('.button-text'); if (text && label) text.textContent = label; }
+function setAuthStage(title, message, progress = 25) { if ($('authStage')) $('authStage').textContent = title; if ($('authMessage')) $('authMessage').textContent = message; if ($('authProgressBar')) $('authProgressBar').style.width = `${progress}%`; }
 
 function setView(view) {
   state.view = view;
@@ -55,6 +59,7 @@ function setView(view) {
   $('personalizeSettings').classList.toggle('hidden', view !== 'personalize');
   $('pageTitle').textContent = view === 'play' ? 'Play Ready' : view === 'notplay' ? 'Not Play Ready' : view === 'loadout' ? 'Loadout' : 'Personalize';
   $('pageSubtitle').textContent = view === 'play' ? 'Accounts ohne aktiven Cooldown oder VAC' : view === 'notplay' ? 'Accounts mit Cooldown, VAC oder unbekanntem Status' : settings ? 'Serverseitige Einstellungen' : 'CS2 Accounts';
+  const animatedView = settings ? $('settingsView') : $('accountsView'); animatedView.classList.remove('view-enter'); requestAnimationFrame(() => animatedView.classList.add('view-enter'));
   if (settings) loadSettings(); else loadAccounts();
 }
 
@@ -77,6 +82,11 @@ async function loadOverview() {
     $('notReadyCount').textContent = notReady.length;
     $('primeCount').textContent = all.filter(a => primeName(a.prime) === 'Prime').length;
     $('nonPrimeCount').textContent = all.filter(a => primeName(a.prime) === 'NonPrime').length;
+    $('healthCount').textContent = all.filter(a => a.healthStatus === 'healthy').length;
+    $('inMatchCount').textContent = all.filter(a => a.inMatch === true).length;
+    $('driftCount').textContent = all.reduce((sum, account) => sum + (account.loadoutMismatchCount || 0), 0);
+    const next = all.map(a => a.nextCheckUtc).filter(Boolean).sort()[0];
+    $('nextCheckHint').textContent = relativeTime(next);
   } catch {}
 }
 
@@ -108,9 +118,10 @@ function renderDetails() {
   $('emptyDetails').classList.add('hidden'); $('accountDetails').classList.remove('hidden');
   $('accountDetails').innerHTML = `
     <div class="details">
-      <div class="detail-head"><span class="avatar avatar-large">${avatarMarkup(account, 'large')}</span><div><h3>${esc(account.personaName || 'Unbekannter Account')}</h3><span class="muted">${esc(account.steamId)}</span></div></div>
+      <div class="detail-head"><span class="avatar avatar-large">${avatarMarkup(account, 'large')}</span><div class="detail-identity"><h3>${esc(account.personaName || 'Unbekannter Account')}</h3><span class="muted">${esc(account.steamId)}</span><div class="status-badges"><span class="badge ${sectionName(account.section) === 'PlayReady' ? 'good' : 'bad'}">${sectionName(account.section) === 'PlayReady' ? 'Play Ready' : 'Not Play Ready'}</span><span class="badge">${primeName(account.prime)}</span><span class="badge ${account.inMatch ? 'live' : ''}">${presenceLabel(account)}</span></div></div></div>
+      <div class="health-grid"><div class="health-card"><small>GC-Verbindung</small><strong>${healthLabel(account.healthStatus)}</strong><span>${formatDate(account.lastCheckUtc || account.statusUpdatedUtc)}</span></div><div class="health-card"><small>Cooldown</small><strong class="${remainingSeconds(account) > 0 ? 'warning-text' : ''}">${cooldownPhase(account)}</strong><span>${duration(account)}</span></div><div class="health-card"><small>Loadout</small><strong>${account.loadoutMismatchCount ?? '—'}</strong><span>${account.loadoutCheckedUtc ? `geprüft ${relativeTime(account.loadoutCheckedUtc)}` : 'noch nicht geprüft'}</span></div></div>
       <div class="stat-grid"><div class="stat"><small>Premier Rating</small><strong>${account.premierRating ?? '—'}</strong></div><div class="stat"><small>CS2 Level</small><strong>${account.cs2Level ?? '—'}</strong></div></div>
-      <div class="detail-lines"><div class="detail-line"><span>Prime</span><strong>${primeName(account.prime)}</strong></div><div class="detail-line"><span>Cooldown</span><strong class="${remainingSeconds(account) > 0 ? 'warning-text' : ''}">${duration(account)}</strong></div><div class="detail-line"><span>VAC</span><strong>${account.vacBanned === true ? 'Ja' : account.vacBanned === false ? 'Nein' : 'Unbekannt'}</strong></div><div class="detail-line"><span>GC-Gesundheit</span><strong>${healthLabel(account.healthStatus)}</strong></div><div class="detail-line"><span>Steam-Präsenz</span><strong>${presenceLabel(account)}</strong></div><div class="detail-line"><span>Letzter GC-Check</span><strong>${formatDate(account.lastCheckUtc || account.statusUpdatedUtc)}</strong></div><div class="detail-line"><span>Nächster Check</span><strong>${formatDate(account.nextCheckUtc)}</strong></div><div class="detail-line"><span>Loadout-Abweichungen</span><strong>${account.loadoutMismatchCount ?? 'Noch nicht geprüft'}</strong></div></div>
+      <div class="detail-lines"><div class="detail-line"><span>VAC</span><strong>${account.vacBanned === true ? 'Ja' : account.vacBanned === false ? 'Nein' : 'Unbekannt'}</strong></div><div class="detail-line"><span>Cooldown-Ende</span><strong>${formatDate(account.cooldownEndsUtc)}</strong></div><div class="detail-line"><span>Nächster GC-Check</span><strong>${formatDate(account.nextCheckUtc)} <span class="muted">(${relativeTime(account.nextCheckUtc)})</span></strong></div><div class="detail-line"><span>Letzter Login</span><strong>${formatDate(account.lastLoginUtc)}</strong></div></div>
       <div class="note-row"><input id="noteInput" value="${esc(account.note || '')}" placeholder="Notiz..."><button id="saveNote">Speichern</button></div>
       <div class="detail-actions"><button data-command="RefreshStatus">Status aktualisieren</button><button data-command="SyncLoadout">Loadout prüfen</button><button data-command="ClearWorkshop">Workshop leeren</button><button data-command="ApplyLoadout">Loadout anwenden</button><button data-command="Personalize">Personalize</button></div>
       <p id="operationMessage" class="muted"></p>
@@ -179,28 +190,31 @@ async function savePersonalize() {
 }
 
 async function startAuth() {
-  try { const accountName = $('steamUsername').value, password = $('steamPassword').value; $('steamPassword').value = ''; const session = await api('/api/auth/sessions', { method: 'POST', body: JSON.stringify({ accountName, password }) }); state.authSession = session.sessionId; $('authProgress').classList.remove('hidden'); pollAuth(); }
-  catch (error) { $('authMessage').textContent = error.message; toast(error.message, true); }
+  setButtonBusy('steamSubmitButton', true, 'Steam-Login läuft ...');
+  $('authProgress').classList.remove('hidden'); setAuthStage('Steam-Verbindung wird aufgebaut', 'Die CM-Verbindung wird vorbereitet ...', 22);
+  try { const accountName = $('steamUsername').value, password = $('steamPassword').value; $('steamPassword').value = ''; const session = await api('/api/auth/sessions', { method: 'POST', body: JSON.stringify({ accountName, password }) }); state.authSession = session.sessionId; setAuthStage('Steam wartet auf Antwort', session.promptMessage || 'Authentifizierung läuft serverseitig ...', 46); pollAuth(); }
+  catch (error) { setAuthStage('Login konnte nicht gestartet werden', error.message, 100); setButtonBusy('steamSubmitButton', false, 'Erneut versuchen'); toast(error.message, true); }
 }
 async function pollAuth() {
   if (!state.authSession) return;
   try {
     const session = await api(`/api/auth/sessions/${state.authSession}`); $('authMessage').textContent = session.promptMessage || 'Steam-Authentifizierung läuft ...';
     const waiting = session.state === 0 || session.state === 1; $('guardLabel').classList.toggle('hidden', !waiting); $('guardSubmit').classList.toggle('hidden', !waiting);
-    if (session.state === 2) { $('authMessage').textContent = 'Account hinzugefügt und Status geladen.'; toast('Steam-Account hinzugefügt.'); setTimeout(() => { $('addAccountDialog').close(); state.authSession = null; loadAccounts(); }, 700); return; }
-    if (session.state === 3) return;
+    if (waiting) { setAuthStage(session.state === 1 ? 'Bestätigung erforderlich' : 'Steam Guard wird erwartet', session.promptMessage || 'Bitte den Code eingeben.', session.state === 1 ? 70 : 58); }
+    if (session.state === 2) { setAuthStage('Account erfolgreich verbunden', 'Status und GC-Daten werden gespeichert ...', 100); toast('Steam-Account hinzugefügt.'); setTimeout(() => { $('addAccountDialog').close(); state.authSession = null; setButtonBusy('steamSubmitButton', false, 'Steam-Login starten'); loadAccounts(); }, 700); return; }
+    if (session.state === 3) { setAuthStage('Steam-Login fehlgeschlagen', session.promptMessage || 'Bitte die Zugangsdaten prüfen.', 100); setButtonBusy('steamSubmitButton', false, 'Erneut versuchen'); return; }
     setTimeout(pollAuth, 1200);
   } catch (error) { $('authMessage').textContent = error.message; }
 }
 async function submitGuard() { if (!state.authSession) return; try { await api(`/api/auth/sessions/${state.authSession}/code`, { method: 'POST', body: JSON.stringify({ code: $('guardCode').value }) }); $('guardCode').value = ''; $('authMessage').textContent = 'Code übermittelt ...'; } catch (error) { toast(error.message, true); } }
 async function checkSession() { try { const me = await api('/api/web/me'); showApp(me.username); await loadSettings(); await loadAccounts(); } catch { showLogin(); } }
 
-$('loginForm').addEventListener('submit', async event => { event.preventDefault(); try { const me = await api('/api/web/login', { method: 'POST', body: JSON.stringify({ username: $('loginUsername').value, password: $('loginPassword').value }) }); $('loginPassword').value = ''; $('loginError').textContent = ''; showApp(me.username); await loadSettings(); await loadAccounts(); } catch (error) { $('loginError').textContent = error.message; } });
+$('loginForm').addEventListener('submit', async event => { event.preventDefault(); setButtonBusy('dashboardLoginButton', true, 'Anmeldung läuft ...'); $('loginError').textContent = ''; try { const me = await api('/api/web/login', { method: 'POST', body: JSON.stringify({ username: $('loginUsername').value, password: $('loginPassword').value }) }); $('loginPassword').value = ''; showApp(me.username); await loadSettings(); await loadAccounts(); } catch (error) { $('loginError').textContent = error.message; setButtonBusy('dashboardLoginButton', false, 'Dashboard öffnen'); } });
 document.querySelectorAll('.nav-item').forEach(item => item.addEventListener('click', () => setView(item.dataset.view)));
 $('refreshButton').addEventListener('click', () => state.view === 'play' || state.view === 'notplay' ? loadAccounts() : loadSettings());
 $('primeFilter').addEventListener('change', loadAccounts); $('accountSearch').addEventListener('input', renderAccounts);
 $('logoutButton').addEventListener('click', async () => { await api('/api/web/logout', { method: 'POST' }); showLogin(); });
-$('addAccountButton').addEventListener('click', () => { $('addAccountForm').reset(); $('authProgress').classList.add('hidden'); $('guardLabel').classList.add('hidden'); $('guardSubmit').classList.add('hidden'); $('addAccountDialog').showModal(); });
+$('addAccountButton').addEventListener('click', () => { $('addAccountForm').reset(); $('authProgress').classList.add('hidden'); $('guardLabel').classList.add('hidden'); $('guardSubmit').classList.add('hidden'); setAuthStage('Verbindung wird vorbereitet', 'Bitte einen Moment warten ...', 25); setButtonBusy('steamSubmitButton', false, 'Steam-Login starten'); $('addAccountDialog').showModal(); });
 $('closeDialog').addEventListener('click', () => $('addAccountDialog').close()); $('addAccountForm').addEventListener('submit', event => { event.preventDefault(); startAuth(); }); $('guardSubmit').addEventListener('click', submitGuard);
 $('saveLoadout').addEventListener('click', saveLoadout); $('savePersonalize').addEventListener('click', savePersonalize);
 $('avatarFile').addEventListener('change', event => { const file = event.target.files[0]; if (!file) { state.avatarBase64 = null; return; } const reader = new FileReader(); reader.onload = () => state.avatarBase64 = String(reader.result).split(',')[1] || null; reader.readAsDataURL(file); });

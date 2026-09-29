@@ -9,35 +9,37 @@
 <body>
   <div id="loginView" class="auth-shell">
     <form id="loginForm" class="auth-card">
-      <div class="brand-mark">CS2</div>
-      <h1>Account Hub</h1>
-      <p class="muted">Melde dich an, um deine Accounts zu verwalten.</p>
-      <label>Dashboard-Benutzername<input id="loginUsername" autocomplete="username" required></label>
-      <label>Passwort<input id="loginPassword" type="password" autocomplete="current-password" required></label>
-      <button class="primary" type="submit">Anmelden</button>
+      <div class="login-brand"><div class="brand-mark">CS2</div><span class="eyebrow">PRIVATE CONTROL CENTER</span></div>
+      <h1>Willkommen zurück</h1>
+      <p class="auth-lead">Verwalte deine Steam-Accounts zentral, sicher und mit Live-Status aus dem Game Coordinator.</p>
+      <div class="login-fields"><label>Dashboard-Benutzername<input id="loginUsername" autocomplete="username" required></label>
+      <label>Passwort<input id="loginPassword" type="password" autocomplete="current-password" required></label></div>
+      <button id="dashboardLoginButton" class="primary login-submit" type="submit"><span class="button-spinner hidden"></span><span class="button-text">Dashboard öffnen</span><span class="button-arrow">→</span></button>
       <p id="loginError" class="error"></p>
+      <div class="auth-footer"><span class="secure-dot"></span> Verschlüsselte Server-Session</div>
     </form>
   </div>
 
   <div id="appView" class="app-shell hidden">
     <aside class="sidebar">
-      <div class="brand"><span class="brand-mark small">CS2</span><span>Account Hub</span></div>
+      <div class="brand"><span class="brand-mark small">CS2</span><div><strong>Account Hub</strong><small>CM / GC CONTROL</small></div></div>
       <nav>
         <button class="nav-item active" data-view="play">✓ <span>Play Ready</span></button>
         <button class="nav-item" data-view="notplay">! <span>Not Play Ready</span></button>
         <button class="nav-item" data-view="loadout">☷ <span>Loadout</span></button>
         <button class="nav-item" data-view="personalize">♙ <span>Personalize</span></button>
       </nav>
-      <div class="sidebar-bottom"><button id="logoutButton" class="ghost">Abmelden</button></div>
+      <div class="sidebar-bottom"><div class="sidebar-status"><span class="live-dot"></span><span>Server verbunden</span></div><button id="logoutButton" class="ghost">Abmelden</button></div>
     </aside>
 
     <main class="main">
       <header class="topbar">
         <div><h2 id="pageTitle">Play Ready</h2><p id="pageSubtitle" class="muted">Accounts ohne aktiven Cooldown oder VAC</p></div>
-        <div class="top-actions"><span id="userLabel" class="muted"></span><button id="refreshButton">Aktualisieren</button></div>
+        <div class="top-actions"><span id="userLabel" class="user-chip"></span><button id="refreshButton"><span class="refresh-icon">↻</span> Aktualisieren</button></div>
       </header>
       <div id="toast" class="toast hidden"></div>
-      <div id="overview" class="overview"><div class="metric"><span>Play Ready</span><strong id="readyCount">—</strong></div><div class="metric"><span>Not Play Ready</span><strong id="notReadyCount">—</strong></div><div class="metric"><span>Prime</span><strong id="primeCount">—</strong></div><div class="metric"><span>Non-Prime</span><strong id="nonPrimeCount">—</strong></div></div>
+      <div id="overview" class="overview"><div class="metric metric-ready"><span class="metric-icon">✓</span><span class="metric-copy"><small>Play Ready</small><strong id="readyCount">—</strong><em>bereit zum Spielen</em></span></div><div class="metric metric-warning"><span class="metric-icon">!</span><span class="metric-copy"><small>Not Play Ready</small><strong id="notReadyCount">—</strong><em>brauchen Aufmerksamkeit</em></span></div><div class="metric metric-prime"><span class="metric-icon">P</span><span class="metric-copy"><small>Prime</small><strong id="primeCount">—</strong><em>bestätigte Accounts</em></span></div><div class="metric metric-neutral"><span class="metric-icon">N</span><span class="metric-copy"><small>Non-Prime</small><strong id="nonPrimeCount">—</strong><em>ohne Prime-Status</em></span></div></div>
+      <section id="signalBar" class="signal-bar"><div class="signal-title"><span class="live-dot"></span><div><strong>CM / GC Monitor</strong><small>Serverseitige Live-Übersicht</small></div></div><div class="signal-stat"><small>GC gesund</small><strong id="healthCount">—</strong></div><div class="signal-stat"><small>In CS2-Match</small><strong id="inMatchCount">—</strong></div><div class="signal-stat"><small>Loadout-Diffs</small><strong id="driftCount">—</strong></div><div class="signal-next"><small>Nächster Check</small><strong id="nextCheckHint">—</strong></div></section>
 
       <section id="accountsView" class="content-grid">
         <div class="accounts-panel panel">
@@ -69,12 +71,12 @@
 
   <dialog id="addAccountDialog">
     <form id="addAccountForm" method="dialog" class="dialog-card">
-      <button type="button" class="close" id="closeDialog">×</button><h3>Steam-Account anmelden</h3>
-      <p class="muted">Benutzername und Passwort werden nur zur Authentifizierung an den Server übertragen. Steam Guard bleibt manuell.</p>
-      <label>Steam-Benutzername<input id="steamUsername" autocomplete="off" required></label>
-      <label>Steam-Passwort<input id="steamPassword" type="password" autocomplete="off" required></label>
-      <button class="primary" type="submit">Steam-Login starten</button>
-      <div id="authProgress" class="auth-progress hidden"><p id="authMessage"></p><label id="guardLabel" class="hidden">Steam Guard / E-Mail-Code<input id="guardCode" autocomplete="one-time-code"></label><button id="guardSubmit" type="button" class="hidden">Code senden</button></div>
+      <button type="button" class="close" id="closeDialog">×</button><div class="dialog-kicker">ACCOUNT ENROLLMENT</div><h3>Steam-Account verbinden</h3>
+      <p class="muted">Die Zugangsdaten werden nur für den serverseitigen Steam-Login verwendet. Steam Guard bleibt vollständig unter deiner Kontrolle.</p>
+      <div class="steam-login-fields"><label>Steam-Benutzername<input id="steamUsername" autocomplete="off" required></label>
+      <label>Steam-Passwort<input id="steamPassword" type="password" autocomplete="off" required></label></div>
+      <button id="steamSubmitButton" class="primary steam-submit" type="submit"><span class="button-spinner hidden"></span><span class="button-text">Steam-Login starten</span><span class="button-arrow">→</span></button>
+      <div id="authProgress" class="auth-progress hidden"><div class="progress-heading"><span class="progress-orb"></span><div><strong id="authStage">Verbindung wird vorbereitet</strong><small id="authMessage">Bitte einen Moment warten ...</small></div></div><div class="progress-track"><span id="authProgressBar"></span></div><label id="guardLabel" class="guard-field hidden">Steam Guard / E-Mail-Code<input id="guardCode" autocomplete="one-time-code"></label><button id="guardSubmit" class="secondary hidden" type="button">Code bestätigen</button></div>
     </form>
   </dialog>
   <script src="/app.js"></script>
