@@ -11,10 +11,10 @@ WORKDIR /app
 RUN apt-get update \
     && apt-get install -y --no-install-recommends gosu \
     && rm -rf /var/lib/apt/lists/* \
-    && groupadd --system --gid 10001 app \
-    && useradd --system --uid 10001 --gid app --home-dir /nonexistent --no-create-home app \
+    && groupadd --system cs2hub \
+    && useradd --system --gid cs2hub --home-dir /nonexistent --no-create-home cs2hub \
     && mkdir -p /data \
-    && chown -R app:app /app /data
+    && chown -R cs2hub:cs2hub /app /data
 COPY --from=build /app/publish .
 ENV ASPNETCORE_URLS=http://+:8080
 EXPOSE 8080
