@@ -100,7 +100,6 @@ internal sealed class CsMatchHistoryService
                 case 5:
                     rounds.Add(DecodeRoundStats(reader.ReadLengthDelimited(wireType)));
                     break;
-                }
                 default:
                     reader.Skip(wireType);
                     break;
