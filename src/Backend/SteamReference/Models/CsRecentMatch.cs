@@ -6,4 +6,9 @@ internal sealed record CsRecentMatch(
     string? Map,
     int? ResultCode,
     int? TeamScore,
-    int? OpponentScore);
+    int? OpponentScore,
+    string? Outcome,
+    string? Mode,
+    int? Kills,
+    int? Assists,
+    int? Deaths);

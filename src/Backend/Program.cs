@@ -12,6 +12,7 @@ var dataDirectory = Environment.GetEnvironmentVariable("CS2_HUB_DATA_DIR")
 Directory.CreateDirectory(dataDirectory);
 
 builder.Services.AddSingleton<AccountStore>();
+builder.Services.AddSingleton<AccountEventStore>();
 builder.Services.AddSingleton<SettingsStore>();
 builder.Services.AddSingleton<OperationStore>();
 builder.Services.AddSingleton<AuthSessionStore>();
@@ -21,6 +22,7 @@ builder.Services.AddDataProtection()
     .SetApplicationName("CS2AccountHub");
 builder.Services.AddSingleton<TokenProtector>();
 builder.Services.AddSingleton<WebSessionService>();
+builder.Services.AddSingleton<SteamPublicProfileService>();
 builder.Services.AddSingleton<ISteamAccountGateway, SteamGateway>();
 builder.Services.AddHostedService<OperationWorker>();
 builder.Services.AddHostedService<AccountCheckScheduler>();
@@ -170,6 +172,55 @@ app.MapPatch("/api/accounts/{id:guid}/prime", (Guid id, SetPrimeRequest request,
         : Results.NotFound();
 });
 
+app.MapPatch("/api/accounts/{id:guid}/perma-green", (Guid id, SetPermaGreenRequest request, AccountStore store, AccountEventStore events) =>
+{
+    var found = store.SetPermaGreen(id, request.Enabled, out var changed);
+    if (!found) return Results.NotFound();
+    if (changed)
+    {
+        events.Append(id, "perma-green", request.Enabled ? "Perma-Green aktiviert" : "Perma-Green deaktiviert",
+            request.Enabled ? "Der Account wird dauerhaft an den Anfang seiner Liste sortiert." : "Der Account wird wieder normal sortiert.",
+            request.Enabled ? "success" : "info");
+    }
+    return Results.NoContent();
+});
+
+app.MapPatch("/api/accounts/{id:guid}/monitoring", (Guid id, SetMonitoringRequest request, AccountStore store, AccountEventStore events) =>
+{
+    var found = store.SetMonitoringPaused(id, request.Paused, out var changed);
+    if (!found) return Results.NotFound();
+    if (changed)
+    {
+        events.Append(id, "monitoring", request.Paused ? "Spielmodus aktiviert" : "Checks fortgesetzt",
+            request.Paused ? "Automatische CM-/GC-Checks bleiben pausiert, damit eine laufende Steam-Sitzung nicht verdrängt wird." : "Der Scheduler darf diesen Account wieder automatisch prüfen.",
+            request.Paused ? "warning" : "success");
+    }
+    return Results.NoContent();
+});
+
+app.MapGet("/api/timeline", (int? limit, Guid? accountId, string? type, AccountEventStore events, AccountStore accounts) =>
+{
+    var items = events.List(limit ?? 120, accountId, type)
+        .Select(item =>
+        {
+            var account = accounts.Get(item.AccountId);
+            return new AccountTimelineEventDto(
+                item.Id,
+                item.AccountId,
+                account?.SteamId ?? "unbekannt",
+                account?.PersonaName,
+                account?.AvatarUrl,
+                account?.IsPermaGreen ?? false,
+                item.Type,
+                item.Title,
+                item.Detail,
+                item.Severity,
+                item.OccurredUtc);
+        })
+        .ToArray();
+    return Results.Ok(items);
+});
+
 app.MapGet("/api/settings/loadout", (SettingsStore settings) => Results.Ok(settings.GetLoadout()));
 app.MapPut("/api/settings/loadout", (LoadoutPresetDto request, SettingsStore settings) =>
 {
@@ -237,7 +288,9 @@ app.MapPost("/api/accounts/{id:guid}/commands", async (
     CommandRequest request,
     AccountStore accounts,
     OperationStore operations,
-    OperationQueue queue) =>
+    OperationQueue queue,
+    SteamPublicProfileService publicProfile,
+    CancellationToken cancellationToken) =>
 {
     if (request.Command == AccountCommand.SignInToSteam)
     {
@@ -249,9 +302,29 @@ app.MapPost("/api/accounts/{id:guid}/commands", async (
         return Results.BadRequest(new { message = "The command payload is invalid or too large." });
     }
 
-    if (accounts.Get(id) is null)
+    var account = accounts.Get(id);
+    if (account is null)
     {
         return Results.NotFound();
+    }
+
+    if (account.MonitoringPaused || account.InMatch == true)
+    {
+        return Results.Conflict(new { message = "Spielmodus aktiv: CM-/GC-Aktionen sind pausiert, damit die laufende Steam-Sitzung nicht verdrängt wird." });
+    }
+
+    SteamProfileSnapshot? publicPresence;
+    try
+    {
+        publicPresence = await publicProfile.GetAsync(account.SteamId, cancellationToken);
+    }
+    catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException)
+    {
+        return Results.Conflict(new { message = $"Steam-Präsenz konnte nicht sicher geprüft werden ({exception.GetType().Name}). Bitte Spielmodus aktivieren und später erneut versuchen." });
+    }
+    if (publicPresence?.IsPlayingCs2 == true)
+    {
+        return Results.Conflict(new { message = "CS2 wurde als laufendes Spiel erkannt. Die CM-/GC-Aktion wurde zum Schutz der Sitzung nicht gestartet." });
     }
 
     var operation = operations.Create(id, request.Command, request.Payload);
@@ -464,7 +537,8 @@ internal sealed class AccountStore
             return _accounts.Values
                 .Where(x => section is null || x.Section == section)
                 .Where(x => prime is null || x.Prime == prime)
-                .OrderBy(x => x.PersonaName ?? x.SteamId)
+                .OrderByDescending(x => x.IsPermaGreen)
+                .ThenBy(x => x.PersonaName ?? x.SteamId)
                 .ToArray();
         }
     }
@@ -504,6 +578,40 @@ internal sealed class AccountStore
         {
             if (!_accounts.TryGetValue(id, out var account)) return false;
             account.Prime = prime;
+            SaveUnsafe();
+            return true;
+        }
+    }
+
+    public bool SetPermaGreen(Guid id, bool enabled, out bool changed)
+    {
+        lock (_gate)
+        {
+            if (!_accounts.TryGetValue(id, out var account))
+            {
+                changed = false;
+                return false;
+            }
+
+            changed = account.IsPermaGreen != enabled;
+            account.IsPermaGreen = enabled;
+            SaveUnsafe();
+            return true;
+        }
+    }
+
+    public bool SetMonitoringPaused(Guid id, bool paused, out bool changed)
+    {
+        lock (_gate)
+        {
+            if (!_accounts.TryGetValue(id, out var account))
+            {
+                changed = false;
+                return false;
+            }
+
+            changed = account.MonitoringPaused != paused;
+            account.MonitoringPaused = paused;
             SaveUnsafe();
             return true;
         }
@@ -578,15 +686,17 @@ internal sealed class OperationWorker : BackgroundService
     private readonly AccountStore _accounts;
     private readonly ISteamAccountGateway _gateway;
     private readonly DiscordWebhookNotifier _notifier;
+    private readonly AccountEventStore _events;
     private readonly ILogger<OperationWorker> _logger;
 
-    public OperationWorker(OperationQueue queue, OperationStore operations, AccountStore accounts, ISteamAccountGateway gateway, DiscordWebhookNotifier notifier, ILogger<OperationWorker> logger)
+    public OperationWorker(OperationQueue queue, OperationStore operations, AccountStore accounts, ISteamAccountGateway gateway, DiscordWebhookNotifier notifier, AccountEventStore events, ILogger<OperationWorker> logger)
     {
         _queue = queue;
         _operations = operations;
         _accounts = accounts;
         _gateway = gateway;
         _notifier = notifier;
+        _events = events;
         _logger = logger;
     }
 
@@ -623,6 +733,18 @@ internal sealed class OperationWorker : BackgroundService
                     account.LastLoginUtc = DateTimeOffset.UtcNow;
                     _accounts.Upsert(account);
 
+                    _events.Append(account.Id, "status", "Status geprüft",
+                        $"{account.HealthStatus}; {account.Section}; {account.Prime}.",
+                        account.Section == AccountSection.PlayReady ? "success" : "warning");
+                    var currentCooldownActive = account.CooldownSeconds is > 0 || account.CooldownEndsUtc > DateTimeOffset.UtcNow;
+                    if (previousCooldownActive != currentCooldownActive)
+                    {
+                        _events.Append(account.Id, "cooldown",
+                            currentCooldownActive ? "Cooldown gestartet" : "Cooldown beendet",
+                            currentCooldownActive ? $"Noch {account.CooldownSeconds ?? 0} Sekunden." : "Der Account wurde wieder ohne aktiven Cooldown bestätigt.",
+                            currentCooldownActive ? "warning" : "success");
+                    }
+
                     if (previousHealth is not null && !string.Equals(previousHealth, account.HealthStatus, StringComparison.Ordinal))
                     {
                         await NotifyEventAsync(account, "GC-Gesundheit geändert", $"Neuer Zustand: {account.HealthStatus}.", 0xF1C40F, stoppingToken);
@@ -655,14 +777,19 @@ internal sealed class OperationWorker : BackgroundService
                 if (result.RecentMatches is not null)
                 {
                     account.RecentMatches = result.RecentMatches
-                        .Select(match => new RecentMatchDto(match.MatchId, match.PlayedUtc, match.Map, match.ResultCode, match.TeamScore, match.OpponentScore))
+                        .Select(match => new RecentMatchDto(match.MatchId, match.PlayedUtc, match.Map, match.ResultCode, match.TeamScore, match.OpponentScore, match.Outcome, match.Mode, match.Kills, match.Assists, match.Deaths))
                         .ToList();
                     account.MatchesCheckedUtc = DateTimeOffset.UtcNow;
                     account.MatchesStatus = "ok";
                     _accounts.Upsert(account);
+                    _events.Append(account.Id, "matches", "Letzte Spiele geladen", $"{account.RecentMatches.Count} Spiele vom Game Coordinator.");
                 }
                 operation.State = result.Success ? OperationState.Succeeded : OperationState.Failed;
                 operation.Message = result.Message;
+                if (result.Success && result.Status is null && result.Loadout is null && result.RecentMatches is null)
+                {
+                    _events.Append(account!.Id, "action", CommandTitle(operation.Command), result.Message, "success");
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -682,6 +809,7 @@ internal sealed class OperationWorker : BackgroundService
                         account.MatchesStatus = "error";
                     }
                     _accounts.Upsert(account);
+                    _events.Append(account.Id, "error", "Operation fehlgeschlagen", $"{operation.Command}: {ex.GetType().Name}.", "error");
                     if (previousHealth is not null && !string.Equals(previousHealth, account.HealthStatus, StringComparison.Ordinal))
                     {
                         await NotifyEventAsync(account, "GC-Check fehlgeschlagen", $"Technischer Fehler: {ex.GetType().Name}.", 0xE74C3C, CancellationToken.None);
@@ -703,6 +831,15 @@ internal sealed class OperationWorker : BackgroundService
         if (!_notifier.IsConfigured) return;
         await _notifier.SendAccountEventAsync(account, title, description, color, cancellationToken);
     }
+
+    private static string CommandTitle(AccountCommand command) => command switch
+    {
+        AccountCommand.ClearWorkshop => "Workshop geleert",
+        AccountCommand.ApplyLoadout => "Loadout angewendet",
+        AccountCommand.Personalize => "Account personalisiert",
+        AccountCommand.SyncLoadout => "Loadout geprüft",
+        _ => "Account-Aktion ausgeführt",
+    };
 }
 
 internal interface ISteamAccountGateway
@@ -748,10 +885,12 @@ internal sealed class AuthSessionStore
     private readonly Dictionary<Guid, AuthSessionRecord> _sessions = new();
 
     private readonly TokenProtector _tokens;
+    private readonly AccountEventStore _events;
 
-    public AuthSessionStore(TokenProtector tokens)
+    public AuthSessionStore(TokenProtector tokens, AccountEventStore events)
     {
         _tokens = tokens;
+        _events = events;
     }
 
     public async Task<AuthSessionRecord> StartAsync(string accountName, string password, ISteamAccountGateway gateway, AccountStore accounts, CancellationToken cancellationToken)
@@ -805,6 +944,7 @@ internal sealed class AuthSessionStore
             account.ApplyProfile(await gateway.QueryProfileAsync(result.SteamId, session.CancellationToken.Token));
             account.StatusUpdatedUtc = DateTimeOffset.UtcNow;
             accounts.Upsert(account);
+            _events.Append(account.Id, "account", "Account verbunden", $"{account.PersonaName ?? account.SteamId} wurde serverseitig hinzugefügt.", "success");
 
             session.State = AuthState.Completed;
             session.PromptMessage = "Account authenticated and status loaded.";
@@ -871,12 +1011,16 @@ internal sealed class AccountRecord
     public uint? LastCooldownSeconds { get; set; }
     public int CooldownTier { get; set; }
     [JsonIgnore]
-    public uint NextCooldownSeconds => CooldownProgression.Next(CooldownTier);
+    public uint? NextCooldownSeconds => CooldownTier > 0 && CooldownEndsUtc is null && LastCooldownSeconds is not null
+        ? CooldownProgression.Next(CooldownTier)
+        : null;
     public DateTimeOffset? CooldownEndsUtc { get; set; }
     public bool CooldownNotificationSent { get; set; }
     public uint? CooldownReason { get; set; }
     public bool? VacBanned { get; set; }
     public string? Note { get; set; }
+    public bool IsPermaGreen { get; set; }
+    public bool MonitoringPaused { get; set; }
     public DateTimeOffset? StatusUpdatedUtc { get; set; }
     public DateTimeOffset? NextCheckUtc { get; set; }
     public DateTimeOffset? LastCheckUtc { get; set; }
@@ -885,6 +1029,7 @@ internal sealed class AccountRecord
     public string? HealthStatus { get; set; }
     public string? LastCheckError { get; set; }
     public bool? InMatch { get; set; }
+    public bool? PublicPlayingCs2 { get; set; }
     public int? LoadoutMismatchCount { get; set; }
     public DateTimeOffset? LoadoutCheckedUtc { get; set; }
     public Dictionary<uint, uint> CurrentLoadoutT { get; set; } = new();
@@ -892,6 +1037,7 @@ internal sealed class AccountRecord
     public DateTimeOffset? MatchesCheckedUtc { get; set; }
     public string? MatchesStatus { get; set; }
     public List<RecentMatchDto> RecentMatches { get; set; } = new();
+    public List<RatingPointDto> RatingHistory { get; set; } = new();
 
     public void ApplyStatus(NfaLoader.Models.CsPremierScoreResult status, AccountPrimeBucket? prime = null)
     {
@@ -908,6 +1054,15 @@ internal sealed class AccountRecord
         CooldownVerifiedUtc = status.HasCooldownData ? now : null;
         HealthStatus = status.HasCooldownData ? "healthy" : "gc-unknown";
         LastCheckError = null;
+
+        if (PremierRating is { } rating)
+        {
+            if (RatingHistory.Count == 0 || RatingHistory[^1].Rating != rating || now - RatingHistory[^1].CapturedUtc >= TimeSpan.FromMinutes(10))
+            {
+                RatingHistory.Add(new RatingPointDto(now, rating));
+                if (RatingHistory.Count > 180) RatingHistory.RemoveRange(0, RatingHistory.Count - 180);
+            }
+        }
 
         if (status.HasCooldown)
         {
@@ -940,6 +1095,7 @@ internal sealed class AccountRecord
         if (profile is null) return;
         if (!string.IsNullOrWhiteSpace(profile.PersonaName)) PersonaName = profile.PersonaName;
         if (!string.IsNullOrWhiteSpace(profile.AvatarUrl)) AvatarUrl = profile.AvatarUrl;
+        if (profile.IsPlayingCs2 is not null) PublicPlayingCs2 = profile.IsPlayingCs2;
     }
 }
 
@@ -988,8 +1144,11 @@ internal static class AccountMappings
         LastCheckUtc = account.LastCheckUtc,
         HealthStatus = account.HealthStatus,
         InMatch = account.InMatch,
+        PublicPlayingCs2 = account.PublicPlayingCs2,
         LoadoutMismatchCount = account.LoadoutMismatchCount,
         LoadoutCheckedUtc = account.LoadoutCheckedUtc,
+        IsPermaGreen = account.IsPermaGreen,
+        MonitoringPaused = account.MonitoringPaused,
     };
 
     public static AccountDetailDto ToDetail(AccountRecord account) => new(
@@ -1002,6 +1161,7 @@ internal static class AccountMappings
         LastCheckUtc = account.LastCheckUtc,
         HealthStatus = account.HealthStatus,
         InMatch = account.InMatch,
+        PublicPlayingCs2 = account.PublicPlayingCs2,
         LoadoutMismatchCount = account.LoadoutMismatchCount,
         LoadoutCheckedUtc = account.LoadoutCheckedUtc,
         CurrentLoadoutT = new Dictionary<uint, uint>(account.CurrentLoadoutT),
@@ -1009,5 +1169,8 @@ internal static class AccountMappings
         MatchesCheckedUtc = account.MatchesCheckedUtc,
         MatchesStatus = account.MatchesStatus,
         RecentMatches = account.RecentMatches,
+        RatingHistory = account.RatingHistory,
+        IsPermaGreen = account.IsPermaGreen,
+        MonitoringPaused = account.MonitoringPaused,
     };
 }

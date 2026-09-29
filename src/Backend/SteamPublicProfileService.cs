@@ -1,7 +1,7 @@
 using System.Net;
 using System.Xml.Linq;
 
-internal sealed record SteamProfileSnapshot(string? PersonaName, string? AvatarUrl);
+internal sealed record SteamProfileSnapshot(string? PersonaName, string? AvatarUrl, bool? IsPlayingCs2 = null);
 
 internal sealed class SteamPublicProfileService
 {
@@ -35,12 +35,17 @@ internal sealed class SteamPublicProfileService
         var document = XDocument.Parse(body, LoadOptions.None);
         var personaName = ValueOf(document, "steamID");
         var avatarUrl = ValueOf(document, "avatarFull");
+        var inGameInfo = document.Descendants().FirstOrDefault(element =>
+            string.Equals(element.Name.LocalName, "inGameInfo", StringComparison.OrdinalIgnoreCase));
+        var gameId = inGameInfo is null ? null : ValueOf(inGameInfo, "gameid");
+        var isPlayingCs2 = inGameInfo is null ? false : string.Equals(gameId, "730", StringComparison.Ordinal);
         return new SteamProfileSnapshot(
             string.IsNullOrWhiteSpace(personaName) ? null : personaName.Trim(),
-            IsTrustedAvatarUrl(avatarUrl) ? avatarUrl : null);
+            IsTrustedAvatarUrl(avatarUrl) ? avatarUrl : null,
+            isPlayingCs2);
     }
 
-    private static string? ValueOf(XDocument document, string name) =>
+    private static string? ValueOf(XContainer document, string name) =>
         document.Descendants().FirstOrDefault(element =>
             string.Equals(element.Name.LocalName, name, StringComparison.OrdinalIgnoreCase))?.Value;
 

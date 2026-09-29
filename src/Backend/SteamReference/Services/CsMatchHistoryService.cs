@@ -75,9 +75,7 @@ internal sealed class CsMatchHistoryService
         ulong matchId = 0;
         DateTimeOffset? playedUtc = null;
         string? map = null;
-        int? resultCode = null;
-        int? teamScore = null;
-        int? opponentScore = null;
+        var rounds = new List<RoundStatsSnapshot>();
         var reader = new SteamProtoReader(payload);
 
         while (reader.TryReadTag(out var field, out var wireType))
@@ -96,16 +94,11 @@ internal sealed class CsMatchHistoryService
                 case 3:
                     map = DecodeWatchableMap(reader.ReadLengthDelimited(wireType)) ?? map;
                     break;
+                case 4:
+                    rounds.Add(DecodeRoundStats(reader.ReadLengthDelimited(wireType)));
+                    break;
                 case 5:
-                {
-                    var round = DecodeRoundStats(reader.ReadLengthDelimited(wireType));
-                    map ??= round.Map;
-                    resultCode ??= round.ResultCode;
-                    if (round.Scores.Count >= 2)
-                    {
-                        teamScore ??= round.Scores[0];
-                        opponentScore ??= round.Scores[1];
-                    }
+                    rounds.Add(DecodeRoundStats(reader.ReadLengthDelimited(wireType)));
                     break;
                 }
                 default:
@@ -114,7 +107,17 @@ internal sealed class CsMatchHistoryService
             }
         }
 
-        return new CsRecentMatch(matchId, playedUtc, map, resultCode, teamScore, opponentScore);
+        var final = rounds
+            .OrderBy(round => round.Round ?? int.MinValue)
+            .LastOrDefault();
+        map ??= final?.Map;
+        var teamScore = final is not null && final.TeamScores.Count >= 2 ? final.TeamScores[0] : null;
+        var opponentScore = final is not null && final.TeamScores.Count >= 2 ? final.TeamScores[1] : null;
+        var outcome = teamScore is not null && opponentScore is not null
+            ? teamScore > opponentScore ? "win" : teamScore < opponentScore ? "loss" : "draw"
+            : null;
+
+        return new CsRecentMatch(matchId, playedUtc, map, final?.MatchResult, teamScore, opponentScore, outcome, null, null, null, null);
     }
 
     private static string? DecodeWatchableMap(byte[] payload)
@@ -128,22 +131,26 @@ internal sealed class CsMatchHistoryService
         return null;
     }
 
-    private static (string? Map, int? ResultCode, List<int> Scores) DecodeRoundStats(byte[] payload)
+    private static RoundStatsSnapshot DecodeRoundStats(byte[] payload)
     {
         string? map = null;
-        int? resultCode = null;
-        var scores = new List<int>();
+        int? round = null;
+        int? matchResult = null;
+        var teamScores = new List<int>();
         var reader = new SteamProtoReader(payload);
         while (reader.TryReadTag(out var field, out var wireType))
         {
             switch (field)
             {
                 case 3: map = reader.ReadString(wireType); break;
-                case 11: resultCode = (int)reader.ReadVarint(wireType); break;
-                case 12: scores.Add((int)reader.ReadVarint(wireType)); break;
+                case 4: round = (int)reader.ReadVarint(wireType); break;
+                case 11: matchResult = (int)reader.ReadVarint(wireType); break;
+                case 12: teamScores.Add((int)reader.ReadVarint(wireType)); break;
                 default: reader.Skip(wireType); break;
             }
         }
-        return (map, resultCode, scores);
+        return new RoundStatsSnapshot(round, map, matchResult, teamScores);
     }
+
+    private sealed record RoundStatsSnapshot(int? Round, string? Map, int? MatchResult, List<int> TeamScores);
 }

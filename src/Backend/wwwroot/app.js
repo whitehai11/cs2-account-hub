@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const state = { view: 'play', accounts: [], selected: null, authSession: null, avatarBase64: null, loadout: null };
+const state = { view: 'play', accounts: [], selected: null, authSession: null, avatarBase64: null, loadout: null, timeline: [] };
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -25,9 +25,20 @@ function presenceLabel(account) { return account.inMatch === true ? 'In CS2-Matc
 function formatDate(value) { return value ? new Date(value).toLocaleString('de-DE') : '—'; }
 function relativeTime(value) { if (!value) return '—'; const seconds = Math.round((new Date(value).getTime() - Date.now()) / 1000); if (Math.abs(seconds) < 60) return seconds >= 0 ? 'gleich' : 'gerade eben'; const minutes = Math.round(Math.abs(seconds) / 60); return seconds >= 0 ? `in ${minutes} Min.` : `vor ${minutes} Min.`; }
 function cooldownPhase(account) { if (account.cooldownSeconds == null && !account.cooldownEndsUtc) return 'Unbekannt'; if (remainingSeconds(account) > 0) return 'Aktiv'; return account.cooldownEndsUtc ? 'GC-Recheck fällig' : 'Bestätigt frei'; }
-function nextCooldownText(account) { const seconds = account.nextCooldownSeconds; if (!seconds) return 'Unbekannt'; if (seconds === 20 * 60 * 60) return '20 Stunden'; if (seconds === 7 * 86400) return '7 Tage'; if (seconds === 31 * 86400) return '31 Tage'; if (seconds === 90 * 86400) return '90 Tage'; return '181 Tage'; }
-function matchResult(match) { if (match.teamScore != null && match.opponentScore != null) return `${match.teamScore} : ${match.opponentScore}`; return match.resultCode == null ? 'Ergebnis nicht verfügbar' : `Match ${match.resultCode}`; }
-function renderRecentMatches(account) { const matches = account.recentMatches || []; const content = matches.length ? matches.map(match => `<div class="match-row"><span class="match-map">${esc(match.map || 'CS2 Match')}</span><span class="match-score">${esc(matchResult(match))}</span><span class="match-date">${esc(formatDate(match.playedUtc))}</span></div>`).join('') : `<div class="matches-empty">${account.matchesStatus === 'ok' ? 'Keine aktuellen Spiele gefunden.' : 'Noch keine Matchdaten geladen.'}</div>`; return `<section class="matches-panel"><div class="matches-heading"><div><h4>Letzte Spiele</h4><small>${account.matchesCheckedUtc ? `Zuletzt geladen ${relativeTime(account.matchesCheckedUtc)}` : 'Abruf über den CS2 Game Coordinator'}</small></div><button class="secondary" data-command="RefreshMatches">${matches.length ? 'Aktualisieren' : 'Laden'}</button></div><div class="matches-list">${content}</div></section>`; }
+function nextCooldownText(account) { const seconds = account.nextCooldownSeconds; if (!seconds) return ''; if (seconds === 20 * 60 * 60) return '20 Stunden'; if (seconds === 7 * 86400) return '7 Tage'; if (seconds === 31 * 86400) return '31 Tage'; if (seconds === 90 * 86400) return '90 Tage'; return '181 Tage'; }
+function matchResult(match) { return match.teamScore != null && match.opponentScore != null ? `${match.teamScore} : ${match.opponentScore}` : '—'; }
+function matchOutcome(match) { return match.outcome === 'win' ? ['W', 'match-win'] : match.outcome === 'loss' ? ['L', 'match-loss'] : match.outcome === 'draw' ? ['T', 'match-draw'] : ['—', '']; }
+function renderRatingTrend(account) {
+  const points = (account.ratingHistory || []).filter(point => Number.isFinite(point.rating)).slice(-90);
+  if (!points.length) return '<section class="rating-panel"><div class="rating-empty">Noch keine Premier-Historie. Der Trend baut sich mit den nächsten GC-Checks auf.</div></section>';
+  const width = 760, height = 190, padX = 32, padY = 22;
+  const values = points.map(point => point.rating), min = Math.min(...values), max = Math.max(...values), span = Math.max(500, max - min);
+  const coords = points.map((point, index) => { const x = points.length === 1 ? width / 2 : padX + index * ((width - padX * 2) / (points.length - 1)); const y = height - padY - ((point.rating - (min - span * .08)) / (span * 1.16)) * (height - padY * 2); return { x, y, point }; });
+  const polyline = coords.map(coord => `${coord.x.toFixed(1)},${coord.y.toFixed(1)}`).join(' ');
+  const latest = points[points.length - 1];
+  return `<section class="rating-panel"><div class="rating-heading"><div><span class="eyebrow">PREMIER TREND</span><h4>Rating-Verlauf</h4><small>${points.length} Messpunkte · zuletzt ${esc(relativeTime(latest.capturedUtc))}</small></div><strong>${esc(latest.rating.toLocaleString('de-DE'))}</strong></div><div class="rating-chart"><span class="chart-label chart-high">${esc(max.toLocaleString('de-DE'))}</span><span class="chart-label chart-low">${esc(min.toLocaleString('de-DE'))}</span><svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Premier Rating Verlauf"><line x1="${padX}" y1="${padY}" x2="${width - padX}" y2="${padY}"/><line x1="${padX}" y1="${height / 2}" x2="${width - padX}" y2="${height / 2}"/><line x1="${padX}" y1="${height - padY}" x2="${width - padX}" y2="${height - padY}"/><polyline points="${polyline}"/></svg></div></section>`;
+}
+function renderRecentMatches(account) { const matches = account.recentMatches || []; const content = matches.length ? matches.map(match => { const [outcome, outcomeClass] = matchOutcome(match); return `<div class="match-row"><span class="match-map">${esc(match.map || 'CS2 Match')}</span><span class="match-outcome ${outcomeClass}">${outcome}</span><span class="match-score">${esc(matchResult(match))}</span><span class="match-mode">${esc(match.mode || 'Premier')}</span><span class="match-stat">${match.kills ?? '—'} / ${match.assists ?? '—'} / ${match.deaths ?? '—'}</span><span class="match-date">${esc(formatDate(match.playedUtc))}</span></div>`; }).join('') : `<div class="matches-empty">${account.matchesStatus === 'ok' ? 'Keine aktuellen Spiele gefunden.' : 'Noch keine Matchdaten geladen.'}</div>`; return `<section class="matches-panel"><div class="matches-heading"><div><h4>Letzte Spiele</h4><small>${account.matchesCheckedUtc ? `Zuletzt geladen ${relativeTime(account.matchesCheckedUtc)}` : 'Abruf über den CS2 Game Coordinator'}</small></div><button class="secondary" data-command="RefreshMatches">${matches.length ? 'Aktualisieren' : 'Laden'}</button></div><div class="match-table-head"><span>Map</span><span>Ergebnis</span><span>Score</span><span>Modus</span><span>K / A / D</span><span>Datum</span></div><div class="matches-list">${content}</div></section>`; }
 function remainingSeconds(account) {
   if (account.cooldownEndsUtc) return Math.max(0, Math.floor((new Date(account.cooldownEndsUtc).getTime() - Date.now()) / 1000));
   return account.cooldownSeconds;
@@ -101,7 +112,7 @@ function renderAccounts() {
   $('accountList').innerHTML = list.length ? list.map(account => `
     <button class="account-row ${state.selected?.id === account.id ? 'selected' : ''}" data-id="${account.id}">
       <span class="avatar">${avatarMarkup(account)}</span>
-      <span class="account-main"><span class="account-name">${esc(account.personaName || 'Unbekannter Account')}</span><span class="account-meta">${esc(account.steamId)} · ${primeName(account.prime)} · ${healthLabel(account.healthStatus)}</span><span class="account-next-cooldown">Nächster Cooldown: ${nextCooldownText(account)}</span></span>
+      <span class="account-main"><span class="account-name">${esc(account.personaName || 'Unbekannter Account')} ${account.isPermaGreen ? '<span class="perma-badge">PERMA-GREEN</span>' : ''}</span><span class="account-meta">${esc(account.steamId)} · ${primeName(account.prime)} · ${healthLabel(account.healthStatus)}</span>${account.nextCooldownSeconds ? `<span class="account-next-cooldown">Nächster Cooldown: ${nextCooldownText(account)}</span>` : ''}</span>
       <span class="status-pill ${sectionName(account.section) === 'PlayReady' ? '' : 'bad'}">${sectionName(account.section) === 'PlayReady' ? 'Ready' : 'Nicht ready'}</span>
     </button>`).join('') : '<div class="empty">Keine Accounts in dieser Kategorie.</div>';
   document.querySelectorAll('.account-row').forEach(row => row.addEventListener('click', () => selectAccount(row.dataset.id)));
@@ -121,17 +132,41 @@ function renderDetails() {
   $('emptyDetails').classList.add('hidden'); $('accountDetails').classList.remove('hidden');
   $('accountDetails').innerHTML = `
     <div class="details">
-      <div class="detail-head"><span class="avatar avatar-large">${avatarMarkup(account, 'large')}</span><div class="detail-identity"><h3>${esc(account.personaName || 'Unbekannter Account')}</h3><span class="muted">${esc(account.steamId)}</span><div class="status-badges"><span class="badge ${sectionName(account.section) === 'PlayReady' ? 'good' : 'bad'}">${sectionName(account.section) === 'PlayReady' ? 'Play Ready' : 'Not Play Ready'}</span><span class="badge">${primeName(account.prime)}</span><span class="badge ${account.inMatch ? 'live' : ''}">${presenceLabel(account)}</span></div></div></div>
+      <div class="detail-head"><span class="avatar avatar-large">${avatarMarkup(account, 'large')}</span><div class="detail-identity"><h3>${esc(account.personaName || 'Unbekannter Account')}</h3><span class="muted">${esc(account.steamId)}</span><div class="status-badges"><span class="badge ${sectionName(account.section) === 'PlayReady' ? 'good' : 'bad'}">${sectionName(account.section) === 'PlayReady' ? 'Play Ready' : 'Not Play Ready'}</span><span class="badge">${primeName(account.prime)}</span><span class="badge ${account.inMatch ? 'live' : ''}">${presenceLabel(account)}</span>${account.publicPlayingCs2 ? '<span class="badge live">CS2 erkannt</span>' : ''}${account.monitoringPaused ? '<span class="badge perma-badge">CHECKS PAUSIERT</span>' : ''}${account.isPermaGreen ? '<span class="badge perma-badge">PERMA-GREEN</span>' : ''}</div></div></div>
       <div class="health-grid"><div class="health-card"><small>GC-Verbindung</small><strong>${healthLabel(account.healthStatus)}</strong><span>${formatDate(account.lastCheckUtc || account.statusUpdatedUtc)}</span></div><div class="health-card"><small>Cooldown</small><strong class="${remainingSeconds(account) > 0 ? 'warning-text' : ''}">${cooldownPhase(account)}</strong><span>${duration(account)}</span></div><div class="health-card"><small>Loadout</small><strong>${account.loadoutMismatchCount ?? '—'}</strong><span>${account.loadoutCheckedUtc ? `geprüft ${relativeTime(account.loadoutCheckedUtc)}` : 'noch nicht geprüft'}</span></div></div>
       <div class="stat-grid"><div class="stat"><small>Premier Rating</small><strong>${account.premierRating ?? '—'}</strong></div><div class="stat"><small>CS2 Level</small><strong>${account.cs2Level ?? '—'}</strong></div></div>
-      <div class="detail-lines"><div class="detail-line"><span>VAC</span><strong>${account.vacBanned === true ? 'Ja' : account.vacBanned === false ? 'Nein' : 'Unbekannt'}</strong></div><div class="detail-line"><span>Cooldown-Ende</span><strong>${formatDate(account.cooldownEndsUtc)}</strong></div><div class="detail-line"><span>Nächster Cooldown</span><strong class="next-cooldown-value">${nextCooldownText(account)}</strong></div><div class="detail-line"><span>Nächster GC-Check</span><strong>${formatDate(account.nextCheckUtc)} <span class="muted">(${relativeTime(account.nextCheckUtc)})</span></strong></div><div class="detail-line"><span>Letzter Login</span><strong>${formatDate(account.lastLoginUtc)}</strong></div></div>
+      ${renderRatingTrend(account)}
+      <div class="detail-lines"><div class="detail-line"><span>VAC</span><strong>${account.vacBanned === true ? 'Ja' : account.vacBanned === false ? 'Nein' : 'Unbekannt'}</strong></div><div class="detail-line"><span>Cooldown-Ende</span><strong>${formatDate(account.cooldownEndsUtc)}</strong></div>${account.nextCooldownSeconds ? `<div class="detail-line"><span>Nächster Cooldown</span><strong class="next-cooldown-value">${nextCooldownText(account)}</strong></div>` : ''}<div class="detail-line"><span>Nächster GC-Check</span><strong>${formatDate(account.nextCheckUtc)} <span class="muted">(${relativeTime(account.nextCheckUtc)})</span></strong></div><div class="detail-line"><span>Letzter Login</span><strong>${formatDate(account.lastLoginUtc)}</strong></div></div>
       <div class="note-row"><input id="noteInput" value="${esc(account.note || '')}" placeholder="Notiz..."><button id="saveNote">Speichern</button></div>
-      <div class="detail-actions"><button data-command="RefreshStatus">Status aktualisieren</button><button data-command="SyncLoadout">Loadout prüfen</button><button data-command="ClearWorkshop">Workshop leeren</button><button data-command="ApplyLoadout">Loadout anwenden</button><button data-command="Personalize">Personalize</button></div>
+      <div class="detail-actions"><button data-command="RefreshStatus">Status aktualisieren</button><button data-command="SyncLoadout">Loadout prüfen</button><button data-command="ClearWorkshop">Workshop leeren</button><button data-command="ApplyLoadout">Loadout anwenden</button><button data-command="Personalize">Personalize</button><button id="permaGreenButton" class="perma-action">${account.isPermaGreen ? 'Perma-Green entfernen' : 'Als Perma-Green markieren'}</button><button id="monitoringButton" class="monitoring-action">${account.monitoringPaused ? 'Checks fortsetzen' : 'Spielmodus aktivieren'}</button></div>
       ${renderRecentMatches(account)}
       <p id="operationMessage" class="muted"></p>
     </div>`;
   $('saveNote').addEventListener('click', saveNote);
+  $('permaGreenButton').addEventListener('click', togglePermaGreen);
+  $('monitoringButton').addEventListener('click', toggleMonitoring);
   document.querySelectorAll('[data-command]').forEach(button => button.addEventListener('click', () => runCommand(button.dataset.command)));
+}
+
+async function toggleMonitoring() {
+  if (!state.selected) return;
+  try {
+    const paused = !state.selected.monitoringPaused;
+    await api(`/api/accounts/${state.selected.id}/monitoring`, { method: 'PATCH', body: JSON.stringify({ paused }) });
+    toast(paused ? 'Spielmodus aktiv: automatische Checks pausiert.' : 'Automatische Checks fortgesetzt.');
+    await selectAccount(state.selected.id);
+    await loadAccounts();
+  } catch (error) { toast(error.message, true); }
+}
+
+async function togglePermaGreen() {
+  if (!state.selected) return;
+  try {
+    await api(`/api/accounts/${state.selected.id}/perma-green`, { method: 'PATCH', body: JSON.stringify({ enabled: !state.selected.isPermaGreen }) });
+    toast(state.selected.isPermaGreen ? 'Perma-Green entfernt.' : 'Perma-Green aktiviert.');
+    await selectAccount(state.selected.id);
+    await loadAccounts();
+  } catch (error) { toast(error.message, true); }
 }
 
 async function saveNote() {
@@ -178,7 +213,22 @@ async function loadSettings() {
     const personalize = await api('/api/settings/personalize');
     $('personaName').value = personalize.personaName || ''; $('realName').value = personalize.realName || ''; $('summary').value = personalize.summary || '';
     $('clearAliasHistory').checked = !!personalize.clearAliasHistory; state.avatarBase64 = personalize.avatarBase64 || null;
+    if (state.view === 'personalize') await loadTimeline();
   } catch (error) { toast(error.message, true); }
+}
+
+function timelineIcon(type) { return ({ status: '↗', cooldown: '◷', action: '✦', matches: '▦', account: '+', 'perma-green': '★', error: '!' }[type] || '•'); }
+function timelineLabel(type) { return ({ status: 'Status', cooldown: 'Cooldown', action: 'Aktion', matches: 'Matches', account: 'Account', 'perma-green': 'Perma-Green', error: 'Fehler' }[type] || 'Ereignis'); }
+function renderTimeline() {
+  const items = state.timeline || [];
+  const counts = items.reduce((result, item) => { result[item.type] = (result[item.type] || 0) + 1; return result; }, {});
+  $('timelineSummary').innerHTML = [['status', 'Checks'], ['cooldown', 'Cooldowns'], ['action', 'Aktionen'], ['error', 'Fehler']].map(([type, label]) => `<div class="timeline-stat"><span class="timeline-stat-bar ${type}" style="--bar:${Math.min(100, (counts[type] || 0) * 12)}%"></span><strong>${counts[type] || 0}</strong><small>${label}</small></div>`).join('');
+  $('timelineList').innerHTML = items.length ? items.map(item => `<button class="timeline-event ${esc(item.severity || 'info')}" data-account-id="${item.accountId}"><span class="timeline-icon">${timelineIcon(item.type)}</span><span class="timeline-event-main"><strong>${esc(item.title)}</strong><span>${esc(item.personaName || item.steamId)}${item.isPermaGreen ? ' · Perma-Green' : ''}</span><small>${esc(item.detail || '')}</small></span><span class="timeline-event-side"><b>${timelineLabel(item.type)}</b><time>${esc(relativeTime(item.occurredUtc))}</time></span></button>`).join('') : '<div class="timeline-empty">Noch keine Ereignisse vorhanden. Sobald der Scheduler oder eine Account-Aktion läuft, erscheint hier die Historie.</div>';
+  document.querySelectorAll('.timeline-event').forEach(item => item.addEventListener('click', () => { setView('play'); selectAccount(item.dataset.accountId); }));
+}
+async function loadTimeline() {
+  try { state.timeline = await api('/api/timeline?limit=180'); renderTimeline(); }
+  catch (error) { toast(error.message, true); }
 }
 async function saveLoadout() {
   try {
@@ -221,5 +271,6 @@ $('logoutButton').addEventListener('click', async () => { await api('/api/web/lo
 $('addAccountButton').addEventListener('click', () => { $('addAccountForm').reset(); $('authProgress').classList.add('hidden'); $('guardLabel').classList.add('hidden'); $('guardSubmit').classList.add('hidden'); setAuthStage('Verbindung wird vorbereitet', 'Bitte einen Moment warten ...', 25); setButtonBusy('steamSubmitButton', false, 'Steam-Login starten'); $('addAccountDialog').showModal(); });
 $('closeDialog').addEventListener('click', () => $('addAccountDialog').close()); $('addAccountForm').addEventListener('submit', event => { event.preventDefault(); startAuth(); }); $('guardSubmit').addEventListener('click', submitGuard);
 $('saveLoadout').addEventListener('click', saveLoadout); $('savePersonalize').addEventListener('click', savePersonalize);
+$('refreshTimelineButton').addEventListener('click', loadTimeline);
 $('avatarFile').addEventListener('change', event => { const file = event.target.files[0]; if (!file) { state.avatarBase64 = null; return; } const reader = new FileReader(); reader.onload = () => state.avatarBase64 = String(reader.result).split(',')[1] || null; reader.readAsDataURL(file); });
 checkSession();

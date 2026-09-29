@@ -60,17 +60,20 @@ public sealed class AccountSummaryDto
     public DateTimeOffset? LastLoginUtc { get; set; }
     public uint? CooldownSeconds { get; set; }
     public DateTimeOffset? CooldownEndsUtc { get; set; }
-    public uint NextCooldownSeconds { get; set; }
+    public uint? NextCooldownSeconds { get; set; }
     public DateTimeOffset? NextCheckUtc { get; set; }
     public DateTimeOffset? LastCheckUtc { get; set; }
     public string? HealthStatus { get; set; }
     public bool? InMatch { get; set; }
+    public bool? PublicPlayingCs2 { get; set; }
     public int? LoadoutMismatchCount { get; set; }
     public DateTimeOffset? LoadoutCheckedUtc { get; set; }
     public uint? CooldownReason { get; set; }
     public bool? VacBanned { get; set; }
     public string? Note { get; set; }
     public DateTimeOffset? StatusUpdatedUtc { get; set; }
+    public bool IsPermaGreen { get; set; }
+    public bool MonitoringPaused { get; set; }
 }
 
 public sealed class AccountDetailDto
@@ -94,11 +97,12 @@ public sealed class AccountDetailDto
     public DateTimeOffset? LastLoginUtc { get; set; }
     public uint? CooldownSeconds { get; set; }
     public DateTimeOffset? CooldownEndsUtc { get; set; }
-    public uint NextCooldownSeconds { get; set; }
+    public uint? NextCooldownSeconds { get; set; }
     public DateTimeOffset? NextCheckUtc { get; set; }
     public DateTimeOffset? LastCheckUtc { get; set; }
     public string? HealthStatus { get; set; }
     public bool? InMatch { get; set; }
+    public bool? PublicPlayingCs2 { get; set; }
     public int? LoadoutMismatchCount { get; set; }
     public DateTimeOffset? LoadoutCheckedUtc { get; set; }
     public Dictionary<uint, uint> CurrentLoadoutT { get; set; } = new();
@@ -106,10 +110,13 @@ public sealed class AccountDetailDto
     public DateTimeOffset? MatchesCheckedUtc { get; set; }
     public string? MatchesStatus { get; set; }
     public IReadOnlyList<RecentMatchDto> RecentMatches { get; set; } = Array.Empty<RecentMatchDto>();
+    public IReadOnlyList<RatingPointDto> RatingHistory { get; set; } = Array.Empty<RatingPointDto>();
     public uint? CooldownReason { get; set; }
     public bool? VacBanned { get; set; }
     public string? Note { get; set; }
     public DateTimeOffset? StatusUpdatedUtc { get; set; }
+    public bool IsPermaGreen { get; set; }
+    public bool MonitoringPaused { get; set; }
 }
 
 public sealed record UpdateNoteRequest(string? Note);
@@ -120,9 +127,33 @@ public sealed record RecentMatchDto(
     string? Map,
     int? ResultCode,
     int? TeamScore,
-    int? OpponentScore);
+    int? OpponentScore,
+    string? Outcome = null,
+    string? Mode = null,
+    int? Kills = null,
+    int? Assists = null,
+    int? Deaths = null);
+
+public sealed record RatingPointDto(DateTimeOffset CapturedUtc, int Rating);
 
 public sealed record SetPrimeRequest(AccountPrimeBucket Prime);
+
+public sealed record SetPermaGreenRequest(bool Enabled);
+
+public sealed record SetMonitoringRequest(bool Paused);
+
+public sealed record AccountTimelineEventDto(
+    Guid Id,
+    Guid AccountId,
+    string SteamId,
+    string? PersonaName,
+    string? AvatarUrl,
+    bool IsPermaGreen,
+    string Type,
+    string Title,
+    string? Detail,
+    string Severity,
+    DateTimeOffset OccurredUtc);
 
 public sealed record LoadoutPresetDto(
     string Name,

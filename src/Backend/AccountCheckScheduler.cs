@@ -7,14 +7,16 @@ internal sealed class AccountCheckScheduler : BackgroundService
     private readonly AccountStore _accounts;
     private readonly OperationStore _operations;
     private readonly OperationQueue _queue;
+    private readonly SteamPublicProfileService _publicProfile;
     private readonly ILogger<AccountCheckScheduler> _logger;
     private readonly TimeSpan _interval;
 
-    public AccountCheckScheduler(AccountStore accounts, OperationStore operations, OperationQueue queue, ILogger<AccountCheckScheduler> logger)
+    public AccountCheckScheduler(AccountStore accounts, OperationStore operations, OperationQueue queue, SteamPublicProfileService publicProfile, ILogger<AccountCheckScheduler> logger)
     {
         _accounts = accounts;
         _operations = operations;
         _queue = queue;
+        _publicProfile = publicProfile;
         _logger = logger;
         _interval = ReadInterval();
     }
@@ -45,6 +47,16 @@ internal sealed class AccountCheckScheduler : BackgroundService
             cancellationToken.ThrowIfCancellationRequested();
             if (string.IsNullOrWhiteSpace(account.ProtectedRefreshToken)) continue;
 
+            if (account.MonitoringPaused)
+            {
+                if (account.NextCheckUtc is null || account.NextCheckUtc <= now)
+                {
+                    account.NextCheckUtc = now.AddMinutes(10);
+                    _accounts.Upsert(account);
+                }
+                continue;
+            }
+
             if (account.NextCheckUtc is null)
             {
                 initialSchedules[account.Id] = now.Add(InitialDelay(account.SteamId));
@@ -62,6 +74,39 @@ internal sealed class AccountCheckScheduler : BackgroundService
             }
 
             if (account.NextCheckUtc > now || _operations.HasActiveForAccount(account.Id)) continue;
+
+            SteamProfileSnapshot? publicProfile;
+            try
+            {
+                publicProfile = await _publicProfile.GetAsync(account.SteamId, cancellationToken);
+            }
+            catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException)
+            {
+                account.NextCheckUtc = now.AddMinutes(10);
+                _accounts.Upsert(account);
+                _logger.LogWarning("Skipped scheduled check for account {AccountId}: public Steam presence could not be verified ({ExceptionType}).", account.Id, exception.GetType().Name);
+                continue;
+            }
+            if (publicProfile?.IsPlayingCs2 == true)
+            {
+                account.PublicPlayingCs2 = true;
+                account.NextCheckUtc = now.AddMinutes(10);
+                _accounts.Upsert(account);
+                _logger.LogInformation("Skipped scheduled check for account {AccountId}: public Steam presence reports CS2.", account.Id);
+                continue;
+            }
+            if (publicProfile?.IsPlayingCs2 == false && account.PublicPlayingCs2 == true)
+            {
+                account.PublicPlayingCs2 = false;
+                _accounts.Upsert(account);
+            }
+            if (account.InMatch == true)
+            {
+                account.NextCheckUtc = now.AddMinutes(10);
+                _accounts.Upsert(account);
+                _logger.LogInformation("Skipped scheduled check for account {AccountId}: last GC status reported an active match.", account.Id);
+                continue;
+            }
 
             account.NextCheckUtc = now.Add(_interval).Add(StableJitter(account.SteamId));
             _accounts.Upsert(account);
