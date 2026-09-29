@@ -110,8 +110,8 @@ internal sealed class CsMatchHistoryService
             .OrderBy(round => round.Round ?? int.MinValue)
             .LastOrDefault();
         map ??= final?.Map;
-        var teamScore = final is not null && final.TeamScores.Count >= 2 ? final.TeamScores[0] : null;
-        var opponentScore = final is not null && final.TeamScores.Count >= 2 ? final.TeamScores[1] : null;
+        var teamScore = final is not null && final.TeamScores.Count >= 2 ? (int?)final.TeamScores[0] : null;
+        var opponentScore = final is not null && final.TeamScores.Count >= 2 ? (int?)final.TeamScores[1] : null;
         var outcome = teamScore is not null && opponentScore is not null
             ? teamScore > opponentScore ? "win" : teamScore < opponentScore ? "loss" : "draw"
             : null;
