@@ -52,6 +52,8 @@ Use new random values when rotating access: edit `.env`, then run `docker compos
 
 The browser dashboard contains Play Ready and Not Play Ready account lists, Prime filters, status refresh, Workshop clearing, server-side Loadout and Personalize presets, account notes and operation confirmations. AutoExec is intentionally not part of the application.
 
+Cooldown notifications are optional. Set `CS2_HUB_DISCORD_WEBHOOK_URL` only in the server's `.env`; the worker sends one notification when the estimated cooldown end is reached and persists the sent state. Never commit or paste a webhook URL into GitHub or chat. If a webhook URL is exposed, revoke it in Discord immediately and create a new one.
+
 ## CI and releases
 
 Every push and pull request builds the backend, Windows bridge and desktop client. Pushing a tag such as `v0.1.0` creates a GitHub Release containing self-contained Windows desktop/bridge archives and a compressed Docker image archive for the backend.

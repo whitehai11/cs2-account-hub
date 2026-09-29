@@ -37,6 +37,7 @@
         <div class="top-actions"><span id="userLabel" class="muted"></span><button id="refreshButton">Aktualisieren</button></div>
       </header>
       <div id="toast" class="toast hidden"></div>
+      <div id="overview" class="overview"><div class="metric"><span>Play Ready</span><strong id="readyCount">—</strong></div><div class="metric"><span>Not Play Ready</span><strong id="notReadyCount">—</strong></div><div class="metric"><span>Prime</span><strong id="primeCount">—</strong></div><div class="metric"><span>Non-Prime</span><strong id="nonPrimeCount">—</strong></div></div>
 
       <section id="accountsView" class="content-grid">
         <div class="accounts-panel panel">
@@ -49,9 +50,9 @@
 
       <section id="settingsView" class="settings-panel panel hidden">
         <div id="loadoutSettings" class="hidden">
-          <h3>Loadout</h3><p class="muted">Der gespeicherte Preset wird serverseitig für „Apply Loadout“ verwendet.</p>
-          <label>Name<input id="loadoutName" placeholder="Default"></label>
-          <div class="two-col"><label>T Slots (JSON)<textarea id="loadoutT" rows="12" spellcheck="false"></textarea></label><label>CT Slots (JSON)<textarea id="loadoutCt" rows="12" spellcheck="false"></textarea></label></div>
+          <div class="settings-heading"><div><h3>Loadout Preset</h3><p class="muted">Wähle deine Waffen pro Slot. Die Auswahl wird auf dem Server gespeichert.</p></div><span class="saved-badge">Serverseitig</span></div>
+          <label class="preset-name">Preset-Name<input id="loadoutName" placeholder="Default"></label>
+          <div id="loadoutEditor" class="loadout-editor"></div>
           <button id="saveLoadout" class="primary">Loadout speichern</button>
         </div>
         <div id="personalizeSettings" class="hidden">

@@ -17,6 +17,7 @@ services:
       CS2_HUB_API_KEY: ${CS2_HUB_API_KEY:?Set CS2_HUB_API_KEY before starting the server}
       CS2_HUB_WEB_USERNAME: ${CS2_HUB_WEB_USERNAME:?Set CS2_HUB_WEB_USERNAME before starting the server}
       CS2_HUB_WEB_PASSWORD: ${CS2_HUB_WEB_PASSWORD:?Set CS2_HUB_WEB_PASSWORD before starting the server}
+      CS2_HUB_DISCORD_WEBHOOK_URL: ${CS2_HUB_DISCORD_WEBHOOK_URL:-}
     volumes:
       - cs2-hub-data:/data
     networks:

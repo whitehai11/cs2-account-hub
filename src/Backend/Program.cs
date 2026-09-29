@@ -22,6 +22,9 @@ builder.Services.AddSingleton<TokenProtector>();
 builder.Services.AddSingleton<WebSessionService>();
 builder.Services.AddSingleton<ISteamAccountGateway, SteamGateway>();
 builder.Services.AddHostedService<OperationWorker>();
+builder.Services.AddHttpClient<DiscordWebhookNotifier>();
+builder.Services.AddHostedService<CooldownNotificationWorker>();
+builder.Services.AddHostedService<ProfileEnrichmentWorker>();
 builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 3 * 1024 * 1024);
 builder.Services.AddRateLimiter(options =>
 {
@@ -438,6 +441,10 @@ internal sealed class AccountStore
             var json = File.Exists(_path) ? File.ReadAllText(_path) : "[]";
             foreach (var account in JsonSerializer.Deserialize<List<AccountRecord>>(json) ?? [])
             {
+                if (account.CooldownEndsUtc is null && account.StatusUpdatedUtc is not null && account.CooldownSeconds is > 0 and <= int.MaxValue)
+                {
+                    account.CooldownEndsUtc = account.StatusUpdatedUtc.Value.AddSeconds(account.CooldownSeconds.Value);
+                }
                 _accounts[account.Id] = account;
             }
         }
@@ -572,6 +579,7 @@ internal sealed class OperationWorker : BackgroundService
                 if (result.Status is not null)
                 {
                     account.ApplyStatus(result.Status, result.Prime);
+                    account.ApplyProfile(await _gateway.QueryProfileAsync(account.SteamId, stoppingToken));
                     account.StatusUpdatedUtc = DateTimeOffset.UtcNow;
                     account.LastLoginUtc = DateTimeOffset.UtcNow;
                     _accounts.Upsert(account);
@@ -616,6 +624,8 @@ internal interface ISteamAccountGateway
         string steamId,
         NfaLoader.Models.CsPremierScoreResult status,
         CancellationToken cancellationToken);
+
+    Task<SteamProfileSnapshot?> QueryProfileAsync(string steamId, CancellationToken cancellationToken);
 
     Task<GatewayResult> ExecuteAsync(AccountRecord account, AccountCommand command, object? payload, CancellationToken cancellationToken);
 }
@@ -679,12 +689,14 @@ internal sealed class AuthSessionStore
             {
                 AccountName = result.AccountName,
                 SteamId = result.SteamId,
+                PersonaName = result.AccountName,
                 ProtectedRefreshToken = _tokens.Protect(result.RefreshToken),
                 LastLoginUtc = DateTimeOffset.UtcNow,
             };
 
             var status = await gateway.QueryStatusAsync(result.RefreshToken, result.SteamId, session.CancellationToken.Token);
             account.ApplyStatus(status, await gateway.QueryPrimeAsync(result.RefreshToken, result.SteamId, status, session.CancellationToken.Token));
+            account.ApplyProfile(await gateway.QueryProfileAsync(result.SteamId, session.CancellationToken.Token));
             account.StatusUpdatedUtc = DateTimeOffset.UtcNow;
             accounts.Upsert(account);
 
@@ -750,6 +762,8 @@ internal sealed class AccountRecord
     public int? Cs2Level { get; set; }
     public DateTimeOffset? LastLoginUtc { get; set; }
     public uint? CooldownSeconds { get; set; }
+    public DateTimeOffset? CooldownEndsUtc { get; set; }
+    public bool CooldownNotificationSent { get; set; }
     public uint? CooldownReason { get; set; }
     public bool? VacBanned { get; set; }
     public string? Note { get; set; }
@@ -757,6 +771,7 @@ internal sealed class AccountRecord
 
     public void ApplyStatus(NfaLoader.Models.CsPremierScoreResult status, AccountPrimeBucket? prime = null)
     {
+        var now = DateTimeOffset.UtcNow;
         PremierRating = status.HasPremierScore ? checked((int)status.PremierRanking!.RankId) : null;
         PremierWins = status.HasPremierScore ? checked((int)status.PremierRanking!.Wins) : null;
         Cs2Level = status.PlayerLevel;
@@ -764,12 +779,30 @@ internal sealed class AccountRecord
         CooldownReason = status.PenaltyReason;
         VacBanned = status.GcVacBannedOrUnknown;
 
+        if (status.HasCooldown)
+        {
+            var candidateEnd = now.AddSeconds(status.PenaltySeconds!.Value);
+            if (CooldownEndsUtc is null || Math.Abs((candidateEnd - CooldownEndsUtc.Value).TotalMinutes) > 2)
+            {
+                CooldownNotificationSent = false;
+            }
+
+            CooldownEndsUtc = candidateEnd;
+        }
+
         if (prime is not null && prime != AccountPrimeBucket.Unknown) Prime = prime.Value;
         else if (Prime == AccountPrimeBucket.Unknown && status.HasPremierScore) Prime = AccountPrimeBucket.Prime;
 
         Section = status.HasCooldownData && !status.HasCooldown && status.GcVacBannedOrUnknown is false
             ? AccountSection.PlayReady
             : AccountSection.NotPlayReady;
+    }
+
+    public void ApplyProfile(SteamProfileSnapshot? profile)
+    {
+        if (profile is null) return;
+        if (!string.IsNullOrWhiteSpace(profile.PersonaName)) PersonaName = profile.PersonaName;
+        if (!string.IsNullOrWhiteSpace(profile.AvatarUrl)) AvatarUrl = profile.AvatarUrl;
     }
 }
 
@@ -811,10 +844,10 @@ internal static class AccountMappings
     public static AccountSummaryDto ToSummary(AccountRecord account) => new(
         account.Id, account.SteamId, account.PersonaName, account.AvatarUrl, account.Prime, account.Section,
         account.PremierRating, account.Cs2Level, account.LastLoginUtc, account.CooldownSeconds,
-        account.CooldownReason, account.VacBanned, account.Note, account.StatusUpdatedUtc);
+        account.CooldownReason, account.VacBanned, account.Note, account.StatusUpdatedUtc, account.CooldownEndsUtc);
 
     public static AccountDetailDto ToDetail(AccountRecord account) => new(
         account.Id, account.SteamId, account.PersonaName, account.AvatarUrl, account.Prime, account.Section,
         account.PremierRating, account.PremierWins, account.Cs2Level, account.LastLoginUtc,
-        account.CooldownSeconds, account.CooldownReason, account.VacBanned, account.Note, account.StatusUpdatedUtc);
+        account.CooldownSeconds, account.CooldownReason, account.VacBanned, account.Note, account.StatusUpdatedUtc, account.CooldownEndsUtc);
 }

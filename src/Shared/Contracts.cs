@@ -40,11 +40,11 @@ public enum AuthState
 
 public sealed class AccountSummaryDto
 {
-    public AccountSummaryDto(Guid id, string steamId, string? personaName, string? avatarUrl, AccountPrimeBucket prime, AccountSection section, int? premierRating, int? cs2Level, DateTimeOffset? lastLoginUtc, uint? cooldownSeconds, uint? cooldownReason, bool? vacBanned, string? note, DateTimeOffset? statusUpdatedUtc)
+    public AccountSummaryDto(Guid id, string steamId, string? personaName, string? avatarUrl, AccountPrimeBucket prime, AccountSection section, int? premierRating, int? cs2Level, DateTimeOffset? lastLoginUtc, uint? cooldownSeconds, uint? cooldownReason, bool? vacBanned, string? note, DateTimeOffset? statusUpdatedUtc, DateTimeOffset? cooldownEndsUtc = null)
     {
         Id = id; SteamId = steamId; PersonaName = personaName; AvatarUrl = avatarUrl; Prime = prime; Section = section;
         PremierRating = premierRating; Cs2Level = cs2Level; LastLoginUtc = lastLoginUtc; CooldownSeconds = cooldownSeconds;
-        CooldownReason = cooldownReason; VacBanned = vacBanned; Note = note; StatusUpdatedUtc = statusUpdatedUtc;
+        CooldownReason = cooldownReason; VacBanned = vacBanned; Note = note; StatusUpdatedUtc = statusUpdatedUtc; CooldownEndsUtc = cooldownEndsUtc;
     }
 
     public Guid Id { get; set; }
@@ -57,6 +57,7 @@ public sealed class AccountSummaryDto
     public int? Cs2Level { get; set; }
     public DateTimeOffset? LastLoginUtc { get; set; }
     public uint? CooldownSeconds { get; set; }
+    public DateTimeOffset? CooldownEndsUtc { get; set; }
     public uint? CooldownReason { get; set; }
     public bool? VacBanned { get; set; }
     public string? Note { get; set; }
@@ -65,11 +66,11 @@ public sealed class AccountSummaryDto
 
 public sealed class AccountDetailDto
 {
-    public AccountDetailDto(Guid id, string steamId, string? personaName, string? avatarUrl, AccountPrimeBucket prime, AccountSection section, int? premierRating, int? premierWins, int? cs2Level, DateTimeOffset? lastLoginUtc, uint? cooldownSeconds, uint? cooldownReason, bool? vacBanned, string? note, DateTimeOffset? statusUpdatedUtc)
+    public AccountDetailDto(Guid id, string steamId, string? personaName, string? avatarUrl, AccountPrimeBucket prime, AccountSection section, int? premierRating, int? premierWins, int? cs2Level, DateTimeOffset? lastLoginUtc, uint? cooldownSeconds, uint? cooldownReason, bool? vacBanned, string? note, DateTimeOffset? statusUpdatedUtc, DateTimeOffset? cooldownEndsUtc = null)
     {
         Id = id; SteamId = steamId; PersonaName = personaName; AvatarUrl = avatarUrl; Prime = prime; Section = section;
         PremierRating = premierRating; PremierWins = premierWins; Cs2Level = cs2Level; LastLoginUtc = lastLoginUtc;
-        CooldownSeconds = cooldownSeconds; CooldownReason = cooldownReason; VacBanned = vacBanned; Note = note; StatusUpdatedUtc = statusUpdatedUtc;
+        CooldownSeconds = cooldownSeconds; CooldownReason = cooldownReason; VacBanned = vacBanned; Note = note; StatusUpdatedUtc = statusUpdatedUtc; CooldownEndsUtc = cooldownEndsUtc;
     }
 
     public Guid Id { get; set; }
@@ -83,6 +84,7 @@ public sealed class AccountDetailDto
     public int? Cs2Level { get; set; }
     public DateTimeOffset? LastLoginUtc { get; set; }
     public uint? CooldownSeconds { get; set; }
+    public DateTimeOffset? CooldownEndsUtc { get; set; }
     public uint? CooldownReason { get; set; }
     public bool? VacBanned { get; set; }
     public string? Note { get; set; }

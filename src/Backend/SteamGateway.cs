@@ -11,6 +11,7 @@ internal sealed class SteamGateway : ISteamAccountGateway
     private readonly CsLoadoutService _loadout = new();
     private readonly SteamWorkshopService _workshop = new();
     private readonly SteamProfileService _profile = new();
+    private readonly SteamPublicProfileService _publicProfile = new();
     private readonly TokenProtector _tokens;
 
     public SteamGateway(TokenProtector tokens)
@@ -33,6 +34,23 @@ internal sealed class SteamGateway : ISteamAccountGateway
 
     public Task<AccountPrimeBucket> QueryPrimeAsync(string refreshToken, string steamId, CsPremierScoreResult status, CancellationToken cancellationToken) =>
         _prime.QueryAsync(refreshToken, steamId, status, cancellationToken);
+
+    public async Task<SteamProfileSnapshot?> QueryProfileAsync(string steamId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _publicProfile.GetAsync(steamId, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Warn($"Steam profile lookup failed ({exception.GetType().Name}).");
+            return null;
+        }
+    }
 
     public async Task<GatewayResult> ExecuteAsync(AccountRecord account, AccountCommand command, object? payload, CancellationToken cancellationToken)
     {
