@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Security.Cryptography;
 using System.Threading.RateLimiting;
 using CS2AccountHub.Contracts;
@@ -293,7 +294,7 @@ internal static class RequestValidation
     {
         return request.Command switch
         {
-            AccountCommand.RefreshStatus or AccountCommand.ClearWorkshop or AccountCommand.SyncLoadout => IsEmptyPayload(request.Payload),
+            AccountCommand.RefreshStatus or AccountCommand.ClearWorkshop or AccountCommand.SyncLoadout or AccountCommand.RefreshMatches => IsEmptyPayload(request.Payload),
             AccountCommand.ApplyLoadout => TryDeserialize(request.Payload, out LoadoutPresetDto? loadout) && loadout is not null && IsValidLoadout(loadout),
             AccountCommand.Personalize => TryDeserialize(request.Payload, out PersonalizePresetDto? personalize) && personalize is not null && IsValidPersonalize(personalize),
             _ => false,
@@ -651,6 +652,15 @@ internal sealed class OperationWorker : BackgroundService
                         await NotifyEventAsync(account, "Loadout-Abgleich geändert", $"Aktuell sind {account.LoadoutMismatchCount ?? 0} Slot-Abweichungen vorhanden.", 0x9B59B6, stoppingToken);
                     }
                 }
+                if (result.RecentMatches is not null)
+                {
+                    account.RecentMatches = result.RecentMatches
+                        .Select(match => new RecentMatchDto(match.MatchId, match.PlayedUtc, match.Map, match.ResultCode, match.TeamScore, match.OpponentScore))
+                        .ToList();
+                    account.MatchesCheckedUtc = DateTimeOffset.UtcNow;
+                    account.MatchesStatus = "ok";
+                    _accounts.Upsert(account);
+                }
                 operation.State = result.Success ? OperationState.Succeeded : OperationState.Failed;
                 operation.Message = result.Message;
             }
@@ -666,6 +676,11 @@ internal sealed class OperationWorker : BackgroundService
                     account.LastCheckUtc = DateTimeOffset.UtcNow;
                     account.HealthStatus = $"error:{ex.GetType().Name}";
                     account.LastCheckError = ex.GetType().Name;
+                    if (operation.Command == AccountCommand.RefreshMatches)
+                    {
+                        account.MatchesCheckedUtc = DateTimeOffset.UtcNow;
+                        account.MatchesStatus = "error";
+                    }
                     _accounts.Upsert(account);
                     if (previousHealth is not null && !string.Equals(previousHealth, account.HealthStatus, StringComparison.Ordinal))
                     {
@@ -715,13 +730,16 @@ internal interface ISteamAccountGateway
     Task<GatewayResult> ExecuteAsync(AccountRecord account, AccountCommand command, object? payload, CancellationToken cancellationToken);
 }
 
-internal sealed record GatewayResult(bool Success, string Message, NfaLoader.Models.CsPremierScoreResult? Status = null, AccountPrimeBucket? Prime = null, NfaLoader.Models.CsLoadoutSnapshot? Loadout = null)
+internal sealed record GatewayResult(bool Success, string Message, NfaLoader.Models.CsPremierScoreResult? Status = null, AccountPrimeBucket? Prime = null, NfaLoader.Models.CsLoadoutSnapshot? Loadout = null, IReadOnlyList<NfaLoader.Models.CsRecentMatch>? RecentMatches = null)
 {
     public static GatewayResult WithStatus(bool success, string message, NfaLoader.Models.CsPremierScoreResult status, AccountPrimeBucket prime) =>
         new(success, message, status, prime);
 
     public static GatewayResult WithLoadout(bool success, string message, NfaLoader.Models.CsLoadoutSnapshot loadout) =>
         new(success, message, null, null, loadout);
+
+    public static GatewayResult WithMatches(bool success, string message, IReadOnlyList<NfaLoader.Models.CsRecentMatch> matches) =>
+        new(success, message, null, null, null, matches);
 }
 
 internal sealed class AuthSessionStore
@@ -850,6 +868,10 @@ internal sealed class AccountRecord
     public int? Cs2Level { get; set; }
     public DateTimeOffset? LastLoginUtc { get; set; }
     public uint? CooldownSeconds { get; set; }
+    public uint? LastCooldownSeconds { get; set; }
+    public int CooldownTier { get; set; }
+    [JsonIgnore]
+    public uint NextCooldownSeconds => CooldownProgression.Next(CooldownTier);
     public DateTimeOffset? CooldownEndsUtc { get; set; }
     public bool CooldownNotificationSent { get; set; }
     public uint? CooldownReason { get; set; }
@@ -867,6 +889,9 @@ internal sealed class AccountRecord
     public DateTimeOffset? LoadoutCheckedUtc { get; set; }
     public Dictionary<uint, uint> CurrentLoadoutT { get; set; } = new();
     public Dictionary<uint, uint> CurrentLoadoutCt { get; set; } = new();
+    public DateTimeOffset? MatchesCheckedUtc { get; set; }
+    public string? MatchesStatus { get; set; }
+    public List<RecentMatchDto> RecentMatches { get; set; } = new();
 
     public void ApplyStatus(NfaLoader.Models.CsPremierScoreResult status, AccountPrimeBucket? prime = null)
     {
@@ -886,6 +911,8 @@ internal sealed class AccountRecord
 
         if (status.HasCooldown)
         {
+            LastCooldownSeconds = status.PenaltySeconds;
+            CooldownTier = Math.Max(CooldownTier, CooldownProgression.Classify(status.PenaltySeconds!.Value));
             var candidateEnd = now.AddSeconds(status.PenaltySeconds!.Value);
             if (CooldownEndsUtc is null || Math.Abs((candidateEnd - CooldownEndsUtc.Value).TotalMinutes) > 2)
             {
@@ -956,6 +983,7 @@ internal static class AccountMappings
         account.PremierRating, account.Cs2Level, account.LastLoginUtc, account.CooldownSeconds,
         account.CooldownReason, account.VacBanned, account.Note, account.StatusUpdatedUtc, account.CooldownEndsUtc)
     {
+        NextCooldownSeconds = account.NextCooldownSeconds,
         NextCheckUtc = account.NextCheckUtc,
         LastCheckUtc = account.LastCheckUtc,
         HealthStatus = account.HealthStatus,
@@ -969,6 +997,7 @@ internal static class AccountMappings
         account.PremierRating, account.PremierWins, account.Cs2Level, account.LastLoginUtc,
         account.CooldownSeconds, account.CooldownReason, account.VacBanned, account.Note, account.StatusUpdatedUtc, account.CooldownEndsUtc)
     {
+        NextCooldownSeconds = account.NextCooldownSeconds,
         NextCheckUtc = account.NextCheckUtc,
         LastCheckUtc = account.LastCheckUtc,
         HealthStatus = account.HealthStatus,
@@ -977,5 +1006,8 @@ internal static class AccountMappings
         LoadoutCheckedUtc = account.LoadoutCheckedUtc,
         CurrentLoadoutT = new Dictionary<uint, uint>(account.CurrentLoadoutT),
         CurrentLoadoutCt = new Dictionary<uint, uint>(account.CurrentLoadoutCt),
+        MatchesCheckedUtc = account.MatchesCheckedUtc,
+        MatchesStatus = account.MatchesStatus,
+        RecentMatches = account.RecentMatches,
     };
 }

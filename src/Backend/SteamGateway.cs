@@ -10,6 +10,7 @@ internal sealed class SteamGateway : ISteamAccountGateway
     private readonly CsPremierScoreService _status = new();
     private readonly SteamPrimeStatusService _prime = new();
     private readonly CsLoadoutService _loadout = new();
+    private readonly CsMatchHistoryService _matches = new();
     private readonly SteamWorkshopService _workshop = new();
     private readonly SteamProfileService _profile = new();
     private readonly SteamPublicProfileService _publicProfile = new();
@@ -92,6 +93,12 @@ internal sealed class SteamGateway : ISteamAccountGateway
                     var preset = _settings.GetLoadout();
                     var snapshot = await _loadout.ReadCurrentAsync(refreshToken, account.SteamId, preset.T, preset.Ct, cancellationToken);
                     return GatewayResult.WithLoadout(true, $"Loadout geprüft: {snapshot.MismatchCount} Abweichungen.", snapshot);
+                }
+
+                case AccountCommand.RefreshMatches:
+                {
+                    var matches = await _matches.QueryRecentAsync(refreshToken, account.SteamId, cancellationToken);
+                    return GatewayResult.WithMatches(true, $"{matches.Count} letzte Spiele geladen.", matches);
                 }
 
                 case AccountCommand.ClearWorkshop:

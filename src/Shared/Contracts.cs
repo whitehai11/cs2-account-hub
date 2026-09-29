@@ -29,6 +29,7 @@ public enum AccountCommand
     Personalize = 3,
     SignInToSteam = 4,
     SyncLoadout = 5,
+    RefreshMatches = 6,
 }
 
 public enum AuthState
@@ -59,6 +60,7 @@ public sealed class AccountSummaryDto
     public DateTimeOffset? LastLoginUtc { get; set; }
     public uint? CooldownSeconds { get; set; }
     public DateTimeOffset? CooldownEndsUtc { get; set; }
+    public uint NextCooldownSeconds { get; set; }
     public DateTimeOffset? NextCheckUtc { get; set; }
     public DateTimeOffset? LastCheckUtc { get; set; }
     public string? HealthStatus { get; set; }
@@ -92,6 +94,7 @@ public sealed class AccountDetailDto
     public DateTimeOffset? LastLoginUtc { get; set; }
     public uint? CooldownSeconds { get; set; }
     public DateTimeOffset? CooldownEndsUtc { get; set; }
+    public uint NextCooldownSeconds { get; set; }
     public DateTimeOffset? NextCheckUtc { get; set; }
     public DateTimeOffset? LastCheckUtc { get; set; }
     public string? HealthStatus { get; set; }
@@ -100,6 +103,9 @@ public sealed class AccountDetailDto
     public DateTimeOffset? LoadoutCheckedUtc { get; set; }
     public Dictionary<uint, uint> CurrentLoadoutT { get; set; } = new();
     public Dictionary<uint, uint> CurrentLoadoutCt { get; set; } = new();
+    public DateTimeOffset? MatchesCheckedUtc { get; set; }
+    public string? MatchesStatus { get; set; }
+    public IReadOnlyList<RecentMatchDto> RecentMatches { get; set; } = Array.Empty<RecentMatchDto>();
     public uint? CooldownReason { get; set; }
     public bool? VacBanned { get; set; }
     public string? Note { get; set; }
@@ -107,6 +113,14 @@ public sealed class AccountDetailDto
 }
 
 public sealed record UpdateNoteRequest(string? Note);
+
+public sealed record RecentMatchDto(
+    ulong MatchId,
+    DateTimeOffset? PlayedUtc,
+    string? Map,
+    int? ResultCode,
+    int? TeamScore,
+    int? OpponentScore);
 
 public sealed record SetPrimeRequest(AccountPrimeBucket Prime);
 

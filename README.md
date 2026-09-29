@@ -56,6 +56,8 @@ Cooldown notifications are optional. Set `CS2_HUB_DISCORD_WEBHOOK_URL` only in t
 
 Status checks are staggered per account by default. `CS2_HUB_CHECK_INTERVAL_MINUTES` controls the base interval (default `30`, allowed range `5` to `1440`); each account receives a stable time offset and checks run through one server-side queue to avoid CM bursts and unnecessary 429 responses.
 
+The dashboard keeps the observed CS2 cooldown progression and shows the projected next duration: 20 hours, 7 days, 31 days, 90 days, then 181 days repeatedly. Recent CS2 matches can be loaded on demand from the Game Coordinator in the selected account's detail view.
+
 ## CI and releases
 
 Every push and pull request builds the backend, Windows bridge and desktop client. Pushing a tag such as `v0.1.0` creates a GitHub Release containing self-contained Windows desktop/bridge archives and a compressed Docker image archive for the backend.
