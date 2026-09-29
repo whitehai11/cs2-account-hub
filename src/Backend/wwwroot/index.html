@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CS2 Account Hub</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div id="loginView" class="auth-shell">
+    <form id="loginForm" class="auth-card">
+      <div class="brand-mark">CS2</div>
+      <h1>Account Hub</h1>
+      <p class="muted">Melde dich an, um deine Accounts zu verwalten.</p>
+      <label>Dashboard-Benutzername<input id="loginUsername" autocomplete="username" required></label>
+      <label>Passwort<input id="loginPassword" type="password" autocomplete="current-password" required></label>
+      <button class="primary" type="submit">Anmelden</button>
+      <p id="loginError" class="error"></p>
+    </form>
+  </div>
+
+  <div id="appView" class="app-shell hidden">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark small">CS2</span><span>Account Hub</span></div>
+      <nav>
+        <button class="nav-item active" data-view="play">✓ <span>Play Ready</span></button>
+        <button class="nav-item" data-view="notplay">! <span>Not Play Ready</span></button>
+        <button class="nav-item" data-view="loadout">☷ <span>Loadout</span></button>
+        <button class="nav-item" data-view="personalize">♙ <span>Personalize</span></button>
+      </nav>
+      <div class="sidebar-bottom"><button id="logoutButton" class="ghost">Abmelden</button></div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div><h2 id="pageTitle">Play Ready</h2><p id="pageSubtitle" class="muted">Accounts ohne aktiven Cooldown oder VAC</p></div>
+        <div class="top-actions"><span id="userLabel" class="muted"></span><button id="refreshButton">Aktualisieren</button></div>
+      </header>
+      <div id="toast" class="toast hidden"></div>
+
+      <section id="accountsView" class="content-grid">
+        <div class="accounts-panel panel">
+          <div class="panel-head"><div><h3>Accounts</h3><p id="accountCount" class="muted"></p></div><button id="addAccountButton" class="primary">Account hinzufügen</button></div>
+          <div class="filters"><select id="primeFilter"><option value="">Prime und Non-Prime</option><option value="Prime">Prime</option><option value="NonPrime">Non-Prime</option><option value="Unknown">Unbekannt</option></select><input id="accountSearch" placeholder="Account suchen..."></div>
+          <div id="accountList" class="account-list"></div>
+        </div>
+        <div class="details-panel panel"><div id="emptyDetails" class="empty">Wähle einen Account aus.</div><div id="accountDetails" class="hidden"></div></div>
+      </section>
+
+      <section id="settingsView" class="settings-panel panel hidden">
+        <div id="loadoutSettings" class="hidden">
+          <h3>Loadout</h3><p class="muted">Der gespeicherte Preset wird serverseitig für „Apply Loadout“ verwendet.</p>
+          <label>Name<input id="loadoutName" placeholder="Default"></label>
+          <div class="two-col"><label>T Slots (JSON)<textarea id="loadoutT" rows="12" spellcheck="false"></textarea></label><label>CT Slots (JSON)<textarea id="loadoutCt" rows="12" spellcheck="false"></textarea></label></div>
+          <button id="saveLoadout" class="primary">Loadout speichern</button>
+        </div>
+        <div id="personalizeSettings" class="hidden">
+          <h3>Personalize</h3><p class="muted">Diese Werte werden beim Klick auf „Personalize“ auf den gewählten Account angewendet.</p>
+          <div class="two-col"><label>Persona-Name<input id="personaName"></label><label>Real Name<input id="realName"></label></div>
+          <label>Summary<textarea id="summary" rows="4"></textarea></label>
+          <label class="check"><input id="clearAliasHistory" type="checkbox"> Alias-Historie löschen</label>
+          <label>Avatar (optional)<input id="avatarFile" type="file" accept="image/*"></label>
+          <button id="savePersonalize" class="primary">Personalize speichern</button>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="addAccountDialog">
+    <form id="addAccountForm" method="dialog" class="dialog-card">
+      <button type="button" class="close" id="closeDialog">×</button><h3>Steam-Account anmelden</h3>
+      <p class="muted">Benutzername und Passwort werden nur zur Authentifizierung an den Server übertragen. Steam Guard bleibt manuell.</p>
+      <label>Steam-Benutzername<input id="steamUsername" autocomplete="off" required></label>
+      <label>Steam-Passwort<input id="steamPassword" type="password" autocomplete="off" required></label>
+      <button class="primary" type="submit">Steam-Login starten</button>
+      <div id="authProgress" class="auth-progress hidden"><p id="authMessage"></p><label id="guardLabel" class="hidden">Steam Guard / E-Mail-Code<input id="guardCode" autocomplete="one-time-code"></label><button id="guardSubmit" type="button" class="hidden">Code senden</button></div>
+    </form>
+  </dialog>
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -4,6 +4,8 @@ obj/
 .idea/
 artifacts/
 data/
+tmp-web-data/
+tmp-publish-check/
 *.user
 *.suo
 *.pdb

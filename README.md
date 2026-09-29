@@ -1,15 +1,15 @@
 # CS2 Account Hub
 
-Server-first CS2 account dashboard for Ubuntu/Docker with a Windows desktop frontend.
+Server-first CS2 account dashboard for Ubuntu/Docker with a browser frontend.
 
-The server owns Steam authentication, Steam Guard code flow, CS2 Game Coordinator status queries, Prime classification, cooldown/VAC sorting, Loadout, Personalize and Workshop actions. The desktop client only renders the dashboard and sends commands. A small Windows bridge is used for the one Windows-specific action: handing a selected server account to the locally installed Steam client.
+The server owns the dashboard login, Steam authentication, Steam Guard code flow, CS2 Game Coordinator status queries, Prime classification, cooldown/VAC sorting, Loadout, Personalize and Workshop actions. The browser is the frontend; Steam credentials and Guard codes are entered there and handled server-side in memory. No Steam desktop client or AutoExec component is required.
 
 ## Project layout
 
 - `src/Shared`: DTOs and enums shared by all components.
 - `src/Backend`: ASP.NET Core API, encrypted token storage and sequential operation worker.
-- `src/WindowsBridge`: local Steam-client handoff; it never receives a Steam password.
-- `src/Desktop`: WinUI 3 frontend.
+- `src/WindowsBridge`: legacy local Steam-client handoff for the older desktop client.
+- `src/Desktop`: legacy WinUI 3 frontend; the current UI is served by the backend at the public API domain.
 - `Dockerfile` and `docker-compose.yml`: Ubuntu server deployment.
 
 Accounts are persisted in `/data`, while refresh tokens are protected with ASP.NET Data Protection keys also stored in `/data/keys`. Keep the Docker volume and API key private. Passwords and Steam Guard codes are accepted only in memory during the authentication request and are never written to the account database or logs.
@@ -25,7 +25,12 @@ dotnet build .\CS2AccountHub.sln
 ```
 
 ```bash
-CS2_HUB_API_KEY='replace-with-a-long-random-value' docker compose up --build
+cat > .env <<'EOF'
+CS2_HUB_API_KEY=replace-with-a-long-random-value
+CS2_HUB_WEB_USERNAME=admin
+CS2_HUB_WEB_PASSWORD=replace-with-a-long-dashboard-password
+EOF
+docker compose up --build -d
 ```
 
 The compose file expects the external Docker network `npm_default` used by Nginx Proxy Manager and publishes the backend on host port `18080`. Create the network once if it does not exist:
@@ -38,7 +43,9 @@ Nginx Proxy Manager can then proxy to `backend:8080` on the `npm_default` networ
 
 Never commit real Steam passwords, Steam Guard codes, refresh tokens, or production encryption keys.
 
-The API key is required by the Docker deployment and must also be configured in the desktop client's `CS2_HUB_API_KEY` environment variable. The desktop defaults to `https://cs2api.infra-maro.com`; set `CS2_HUB_API_URL` only when using another endpoint.
+Open `https://cs2api.infra-maro.com` after the container is running and use `CS2_HUB_WEB_USERNAME` / `CS2_HUB_WEB_PASSWORD` for the dashboard. The API key remains available for compatible automation and the legacy desktop client; the browser uses the protected web session cookie instead. Steam accounts are added from the web dashboard with their Steam username/password, followed by manual Steam Guard or e-mail confirmation when requested.
+
+The browser dashboard contains Play Ready and Not Play Ready account lists, Prime filters, status refresh, Workshop clearing, server-side Loadout and Personalize presets, account notes and operation confirmations. AutoExec is intentionally not part of the application.
 
 ## CI and releases
 

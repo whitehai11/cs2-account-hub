@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Security.Cryptography;
 using CS2AccountHub.Contracts;
 using Microsoft.AspNetCore.DataProtection;
 
@@ -18,6 +19,7 @@ builder.Services.AddDataProtection()
     .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(dataDirectory, "keys")))
     .SetApplicationName("CS2AccountHub");
 builder.Services.AddSingleton<TokenProtector>();
+builder.Services.AddSingleton<WebSessionService>();
 builder.Services.AddSingleton<ISteamAccountGateway, SteamGateway>();
 builder.Services.AddHostedService<OperationWorker>();
 
@@ -32,23 +34,59 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 var apiKey = Environment.GetEnvironmentVariable("CS2_HUB_API_KEY");
-if (!string.IsNullOrWhiteSpace(apiKey))
+var webSessions = app.Services.GetRequiredService<WebSessionService>();
+app.UseDefaultFiles();
+app.UseStaticFiles();
+app.Use(async (context, next) =>
 {
-    app.Use(async (context, next) =>
-    {
-        if (context.Request.Path.StartsWithSegments("/api") &&
-            (!context.Request.Headers.TryGetValue("X-CS2-Hub-Key", out var supplied) || supplied != apiKey))
-        {
-            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            return;
-        }
+    var isApiRequest = context.Request.Path.StartsWithSegments("/api");
+    var isWebAuthRequest = context.Request.Path.StartsWithSegments("/api/web");
+    var apiKeyAccepted = !string.IsNullOrWhiteSpace(apiKey)
+        && context.Request.Headers.TryGetValue("X-CS2-Hub-Key", out var supplied)
+        && CryptographicOperations.FixedTimeEquals(
+            System.Text.Encoding.UTF8.GetBytes(supplied.ToString()),
+            System.Text.Encoding.UTF8.GetBytes(apiKey));
 
-        await next();
-    });
-}
+    if (isApiRequest && !isWebAuthRequest && !webSessions.IsAuthenticated(context) && !apiKeyAccepted)
+    {
+        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        return;
+    }
+
+    await next();
+});
 app.UseCors();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+
+app.MapPost("/api/web/login", (WebLoginRequest request, WebSessionService sessions, HttpResponse response) =>
+{
+    var expectedUser = Environment.GetEnvironmentVariable("CS2_HUB_WEB_USERNAME");
+    var expectedPassword = Environment.GetEnvironmentVariable("CS2_HUB_WEB_PASSWORD");
+    if (string.IsNullOrWhiteSpace(expectedUser) || string.IsNullOrWhiteSpace(expectedPassword) ||
+        !WebSessionService.ConstantTimeEquals(request.Username, expectedUser) ||
+        !WebSessionService.ConstantTimeEquals(request.Password, expectedPassword))
+    {
+        return Results.Json(new { message = "Invalid dashboard credentials." }, statusCode: StatusCodes.Status401Unauthorized);
+    }
+
+    sessions.SignIn(response, request.Username.Trim());
+    return Results.Ok(new { authenticated = true, username = request.Username.Trim() });
+});
+
+app.MapGet("/api/web/me", (WebSessionService sessions, HttpContext context) =>
+{
+    var username = sessions.GetUsername(context);
+    return username is null
+        ? Results.Json(new { message = "Authentication required." }, statusCode: StatusCodes.Status401Unauthorized)
+        : Results.Ok(new { authenticated = true, username });
+});
+
+app.MapPost("/api/web/logout", (WebSessionService sessions, HttpResponse response) =>
+{
+    sessions.SignOut(response);
+    return Results.NoContent();
+});
 
 app.MapGet("/api/accounts", (AccountStore store, AccountSection? section, AccountPrimeBucket? prime) =>
 {
@@ -167,7 +205,80 @@ app.MapPost("/api/accounts/{id:guid}/commands", async (
     return Results.Accepted($"/api/operations/{operation.Id}", OperationMappings.ToDto(operation));
 });
 
+app.MapFallbackToFile("index.html");
+
 app.Run();
+
+public sealed record WebLoginRequest(string Username, string Password);
+
+internal sealed class WebSessionService
+{
+    public const string CookieName = "cs2hub_session";
+    private static readonly TimeSpan Lifetime = TimeSpan.FromHours(8);
+    private readonly IDataProtector _protector;
+
+    public WebSessionService(IDataProtectionProvider provider)
+    {
+        _protector = provider.CreateProtector("web-session-v1");
+    }
+
+    public void SignIn(HttpResponse response, string username)
+    {
+        var expires = DateTimeOffset.UtcNow.Add(Lifetime);
+        var secureCookie = !string.Equals(Environment.GetEnvironmentVariable("CS2_HUB_COOKIE_SECURE"), "false", StringComparison.OrdinalIgnoreCase);
+        var value = _protector.Protect($"{username}\n{expires.ToUnixTimeSeconds()}");
+        response.Cookies.Append(CookieName, value, new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = secureCookie,
+            SameSite = SameSiteMode.Lax,
+            Expires = expires,
+            IsEssential = true,
+        });
+    }
+
+    public void SignOut(HttpResponse response) => response.Cookies.Delete(CookieName, new CookieOptions
+    {
+        HttpOnly = true,
+        Secure = !string.Equals(Environment.GetEnvironmentVariable("CS2_HUB_COOKIE_SECURE"), "false", StringComparison.OrdinalIgnoreCase),
+        SameSite = SameSiteMode.Lax,
+        IsEssential = true,
+    });
+
+    public bool IsAuthenticated(HttpContext context) => GetUsername(context) is not null;
+
+    public string? GetUsername(HttpContext context)
+    {
+        if (!context.Request.Cookies.TryGetValue(CookieName, out var value) || string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        try
+        {
+            var parts = _protector.Unprotect(value).Split('\n', 2);
+            if (parts.Length != 2 || !long.TryParse(parts[1], out var expiry) ||
+                expiry <= DateTimeOffset.UtcNow.ToUnixTimeSeconds() || string.IsNullOrWhiteSpace(parts[0]))
+            {
+                return null;
+            }
+
+            return parts[0];
+        }
+        catch (CryptographicException)
+        {
+            return null;
+        }
+    }
+
+    public static bool ConstantTimeEquals(string? left, string? right)
+    {
+        if (left is null || right is null) return false;
+        var leftBytes = System.Text.Encoding.UTF8.GetBytes(left);
+        var rightBytes = System.Text.Encoding.UTF8.GetBytes(right);
+        return leftBytes.Length == rightBytes.Length && CryptographicOperations.FixedTimeEquals(leftBytes, rightBytes);
+    }
+}
 
 internal sealed class AccountStore
 {

@@ -10,4 +10,8 @@
     <ProjectReference Include="..\Shared\CS2AccountHub.Contracts.csproj" />
     <PackageReference Include="Microsoft.AspNetCore.DataProtection.Extensions" Version="8.0.0" />
   </ItemGroup>
+
+  <ItemGroup>
+    <Content Update="wwwroot\**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>
