@@ -20,6 +20,8 @@ async function api(path, options = {}) {
 function enumName(value, names) { return typeof value === 'number' ? names[value] : value; }
 function primeName(value) { return enumName(value, ['Unknown', 'Prime', 'NonPrime']) || 'Unknown'; }
 function sectionName(value) { return enumName(value, ['PlayReady', 'NotPlayReady']) || 'NotPlayReady'; }
+function healthLabel(value) { return value === 'healthy' ? 'GC gesund' : value === 'gc-unknown' ? 'GC unvollständig' : value?.startsWith('error:') ? 'GC-Fehler' : 'Noch nicht geprüft'; }
+function presenceLabel(account) { return account.inMatch === true ? 'In CS2-Match' : account.inMatch === false ? 'Nicht im Match' : 'Unbekannt'; }
 function formatDate(value) { return value ? new Date(value).toLocaleString('de-DE') : '—'; }
 function remainingSeconds(account) {
   if (account.cooldownEndsUtc) return Math.max(0, Math.floor((new Date(account.cooldownEndsUtc).getTime() - Date.now()) / 1000));
@@ -86,7 +88,7 @@ function renderAccounts() {
   $('accountList').innerHTML = list.length ? list.map(account => `
     <button class="account-row ${state.selected?.id === account.id ? 'selected' : ''}" data-id="${account.id}">
       <span class="avatar">${avatarMarkup(account)}</span>
-      <span class="account-main"><span class="account-name">${esc(account.personaName || 'Unbekannter Account')}</span><span class="account-meta">${esc(account.steamId)} · ${primeName(account.prime)}</span></span>
+      <span class="account-main"><span class="account-name">${esc(account.personaName || 'Unbekannter Account')}</span><span class="account-meta">${esc(account.steamId)} · ${primeName(account.prime)} · ${healthLabel(account.healthStatus)}</span></span>
       <span class="status-pill ${sectionName(account.section) === 'PlayReady' ? '' : 'bad'}">${sectionName(account.section) === 'PlayReady' ? 'Ready' : 'Nicht ready'}</span>
     </button>`).join('') : '<div class="empty">Keine Accounts in dieser Kategorie.</div>';
   document.querySelectorAll('.account-row').forEach(row => row.addEventListener('click', () => selectAccount(row.dataset.id)));
@@ -108,9 +110,9 @@ function renderDetails() {
     <div class="details">
       <div class="detail-head"><span class="avatar avatar-large">${avatarMarkup(account, 'large')}</span><div><h3>${esc(account.personaName || 'Unbekannter Account')}</h3><span class="muted">${esc(account.steamId)}</span></div></div>
       <div class="stat-grid"><div class="stat"><small>Premier Rating</small><strong>${account.premierRating ?? '—'}</strong></div><div class="stat"><small>CS2 Level</small><strong>${account.cs2Level ?? '—'}</strong></div></div>
-      <div class="detail-lines"><div class="detail-line"><span>Prime</span><strong>${primeName(account.prime)}</strong></div><div class="detail-line"><span>Cooldown</span><strong class="${remainingSeconds(account) > 0 ? 'warning-text' : ''}">${duration(account)}</strong></div><div class="detail-line"><span>VAC</span><strong>${account.vacBanned === true ? 'Ja' : account.vacBanned === false ? 'Nein' : 'Unbekannt'}</strong></div><div class="detail-line"><span>Letzter Login</span><strong>${formatDate(account.lastLoginUtc)}</strong></div><div class="detail-line"><span>Status aktualisiert</span><strong>${formatDate(account.statusUpdatedUtc)}</strong></div></div>
+      <div class="detail-lines"><div class="detail-line"><span>Prime</span><strong>${primeName(account.prime)}</strong></div><div class="detail-line"><span>Cooldown</span><strong class="${remainingSeconds(account) > 0 ? 'warning-text' : ''}">${duration(account)}</strong></div><div class="detail-line"><span>VAC</span><strong>${account.vacBanned === true ? 'Ja' : account.vacBanned === false ? 'Nein' : 'Unbekannt'}</strong></div><div class="detail-line"><span>GC-Gesundheit</span><strong>${healthLabel(account.healthStatus)}</strong></div><div class="detail-line"><span>Steam-Präsenz</span><strong>${presenceLabel(account)}</strong></div><div class="detail-line"><span>Letzter GC-Check</span><strong>${formatDate(account.lastCheckUtc || account.statusUpdatedUtc)}</strong></div><div class="detail-line"><span>Nächster Check</span><strong>${formatDate(account.nextCheckUtc)}</strong></div><div class="detail-line"><span>Loadout-Abweichungen</span><strong>${account.loadoutMismatchCount ?? 'Noch nicht geprüft'}</strong></div></div>
       <div class="note-row"><input id="noteInput" value="${esc(account.note || '')}" placeholder="Notiz..."><button id="saveNote">Speichern</button></div>
-      <div class="detail-actions"><button data-command="RefreshStatus">Status aktualisieren</button><button data-command="ClearWorkshop">Workshop leeren</button><button data-command="ApplyLoadout">Loadout anwenden</button><button data-command="Personalize">Personalize</button></div>
+      <div class="detail-actions"><button data-command="RefreshStatus">Status aktualisieren</button><button data-command="SyncLoadout">Loadout prüfen</button><button data-command="ClearWorkshop">Workshop leeren</button><button data-command="ApplyLoadout">Loadout anwenden</button><button data-command="Personalize">Personalize</button></div>
       <p id="operationMessage" class="muted"></p>
     </div>`;
   $('saveNote').addEventListener('click', saveNote);
@@ -128,7 +130,7 @@ async function runCommand(command) {
     let payload = null;
     if (command === 'ApplyLoadout') payload = await api('/api/settings/loadout');
     if (command === 'Personalize') payload = await api('/api/settings/personalize');
-    const commandValues = { RefreshStatus: 0, ClearWorkshop: 1, ApplyLoadout: 2, Personalize: 3 };
+    const commandValues = { RefreshStatus: 0, ClearWorkshop: 1, ApplyLoadout: 2, Personalize: 3, SyncLoadout: 5 };
     const operation = await api(`/api/accounts/${state.selected.id}/commands`, { method: 'POST', body: JSON.stringify({ command: commandValues[command], payload }) });
     $('operationMessage').textContent = 'Aktion läuft ...';
     let current = operation;

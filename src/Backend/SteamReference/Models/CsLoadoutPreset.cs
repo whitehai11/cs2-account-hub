@@ -44,3 +44,9 @@ internal sealed record CsLoadoutApplyResult(int Requested, int Confirmed, IReadO
 {
     public bool IsSuccess => Requested > 0 && Confirmed == Requested && Failures.Count == 0;
 }
+
+internal sealed record CsLoadoutSnapshot(
+    IReadOnlyDictionary<uint, uint> T,
+    IReadOnlyDictionary<uint, uint> Ct,
+    int MismatchCount,
+    DateTimeOffset CheckedUtc);

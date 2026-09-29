@@ -28,6 +28,7 @@ public enum AccountCommand
     ApplyLoadout = 2,
     Personalize = 3,
     SignInToSteam = 4,
+    SyncLoadout = 5,
 }
 
 public enum AuthState
@@ -58,6 +59,12 @@ public sealed class AccountSummaryDto
     public DateTimeOffset? LastLoginUtc { get; set; }
     public uint? CooldownSeconds { get; set; }
     public DateTimeOffset? CooldownEndsUtc { get; set; }
+    public DateTimeOffset? NextCheckUtc { get; set; }
+    public DateTimeOffset? LastCheckUtc { get; set; }
+    public string? HealthStatus { get; set; }
+    public bool? InMatch { get; set; }
+    public int? LoadoutMismatchCount { get; set; }
+    public DateTimeOffset? LoadoutCheckedUtc { get; set; }
     public uint? CooldownReason { get; set; }
     public bool? VacBanned { get; set; }
     public string? Note { get; set; }
@@ -85,6 +92,14 @@ public sealed class AccountDetailDto
     public DateTimeOffset? LastLoginUtc { get; set; }
     public uint? CooldownSeconds { get; set; }
     public DateTimeOffset? CooldownEndsUtc { get; set; }
+    public DateTimeOffset? NextCheckUtc { get; set; }
+    public DateTimeOffset? LastCheckUtc { get; set; }
+    public string? HealthStatus { get; set; }
+    public bool? InMatch { get; set; }
+    public int? LoadoutMismatchCount { get; set; }
+    public DateTimeOffset? LoadoutCheckedUtc { get; set; }
+    public Dictionary<uint, uint> CurrentLoadoutT { get; set; } = new();
+    public Dictionary<uint, uint> CurrentLoadoutCt { get; set; } = new();
     public uint? CooldownReason { get; set; }
     public bool? VacBanned { get; set; }
     public string? Note { get; set; }

@@ -36,6 +36,39 @@ internal sealed class CsLoadoutService
         }
     }
 
+    public async Task<CsLoadoutSnapshot> ReadCurrentAsync(
+        string refreshToken,
+        string steamId,
+        IReadOnlyDictionary<uint, uint> expectedT,
+        IReadOnlyDictionary<uint, uint> expectedCt,
+        CancellationToken cancellationToken = default)
+    {
+        if (!ulong.TryParse(steamId, CultureInfo.InvariantCulture, out var steamId64))
+        {
+            throw new InvalidOperationException(Loc.T("Cs_Loadout_BadSteam64"));
+        }
+
+        var accountId = CsGcSession.GetAccountId(steamId64);
+        await using var cmClient = new SteamCmClient(HttpClient);
+        await cmClient.ConnectAndLogOnAsync(refreshToken, steamId, cancellationToken);
+        try
+        {
+            await cmClient.SetGamesPlayedAsync([CsGcSession.Cs2AppId], cancellationToken);
+            var welcomePayload = await CsGcSession.ConnectAsync(cmClient, cancellationToken);
+            var explicitCurrent = CsSoCacheParser.ParseLoadoutFromWelcome(welcomePayload, accountId)
+                .ToDictionary(entry => (entry.ClassId, entry.SlotId), entry => entry.ItemDefinition);
+
+            var currentT = ResolveKnownSlots(explicitCurrent, CsLoadoutConstants.TeamTerrorist);
+            var currentCt = ResolveKnownSlots(explicitCurrent, CsLoadoutConstants.TeamCounterTerrorist);
+            var mismatchCount = CountMismatches(expectedT, currentT) + CountMismatches(expectedCt, currentCt);
+            return new CsLoadoutSnapshot(currentT, currentCt, mismatchCount, DateTimeOffset.UtcNow);
+        }
+        finally
+        {
+            try { await cmClient.SetGamesPlayedAsync([], CancellationToken.None); } catch { }
+        }
+    }
+
     private async Task<CsLoadoutApplyResult> ApplyPresetCoreAsync(
         CsLoadoutPreset preset,
         string refreshToken,
@@ -388,6 +421,31 @@ internal sealed class CsLoadoutService
         soCacheVersion != 0
             ? (uint)((soCacheVersion + 1) & 0xFFFFFFFF)
             : 1;
+
+    private static Dictionary<uint, uint> ResolveKnownSlots(
+        IReadOnlyDictionary<(uint Team, uint Slot), uint> explicitEntries,
+        uint team)
+    {
+        var result = new Dictionary<uint, uint>();
+        foreach (var slot in new uint[] { 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18 })
+        {
+            if (explicitEntries.TryGetValue((team, slot), out var explicitDefinition))
+            {
+                result[slot] = explicitDefinition;
+            }
+            else if (CsLoadoutConstants.TryGetImplicitDefault(team, slot, out var defaultDefinition))
+            {
+                result[slot] = defaultDefinition;
+            }
+        }
+
+        return result;
+    }
+
+    private static int CountMismatches(
+        IReadOnlyDictionary<uint, uint> expected,
+        IReadOnlyDictionary<uint, uint> actual) =>
+        expected.Count(entry => !actual.TryGetValue(entry.Key, out var actualDefinition) || actualDefinition != entry.Value);
 
     // Batch equip message with its own itemId per slot (the whole loadout is sent at once).
     private static byte[] EncodeAdjustEquipSlotsMulti(

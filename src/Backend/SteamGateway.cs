@@ -13,10 +13,12 @@ internal sealed class SteamGateway : ISteamAccountGateway
     private readonly SteamProfileService _profile = new();
     private readonly SteamPublicProfileService _publicProfile = new();
     private readonly TokenProtector _tokens;
+    private readonly SettingsStore _settings;
 
-    public SteamGateway(TokenProtector tokens)
+    public SteamGateway(TokenProtector tokens, SettingsStore settings)
     {
         _tokens = tokens;
+        _settings = settings;
     }
 
     public Task<CredentialsAuthResult> AuthenticateAsync(
@@ -82,6 +84,13 @@ internal sealed class SteamGateway : ISteamAccountGateway
                         };
                     var result = await _loadout.ApplyPresetAsync(preset, refreshToken, account.SteamId, cancellationToken);
                     return new GatewayResult(result.IsSuccess, $"Loadout: {result.Confirmed}/{result.Requested} slots confirmed.");
+                }
+
+                case AccountCommand.SyncLoadout:
+                {
+                    var preset = _settings.GetLoadout();
+                    var snapshot = await _loadout.ReadCurrentAsync(refreshToken, account.SteamId, preset.T, preset.Ct, cancellationToken);
+                    return GatewayResult.WithLoadout(true, $"Loadout geprüft: {snapshot.MismatchCount} Abweichungen.", snapshot);
                 }
 
                 case AccountCommand.ClearWorkshop:

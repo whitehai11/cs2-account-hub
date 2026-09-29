@@ -13,12 +13,24 @@ internal sealed class DiscordWebhookNotifier
 
     public bool IsConfigured => TryGetWebhookUrl() is not null;
 
-    public async Task<bool> SendCooldownDoneAsync(AccountRecord account, CancellationToken cancellationToken)
+    public Task<bool> SendCooldownDoneAsync(AccountRecord account, CancellationToken cancellationToken) =>
+        SendAccountEventAsync(
+            account,
+            $"Cooldown beendet: {account.PersonaName ?? account.SteamId}",
+            "Der CS2-Cooldown ist beendet.",
+            0x2ECC71,
+            cancellationToken);
+
+    public async Task<bool> SendAccountEventAsync(
+        AccountRecord account,
+        string title,
+        string description,
+        int color,
+        CancellationToken cancellationToken)
     {
         var webhookUrl = TryGetWebhookUrl();
         if (webhookUrl is null) return false;
 
-        var title = $"Cooldown beendet: {account.PersonaName ?? account.SteamId}";
         var payload = new
         {
             username = "CS2 Account Hub",
@@ -28,8 +40,8 @@ internal sealed class DiscordWebhookNotifier
                 new
                 {
                     title,
-                    description = $"Der CS2-Cooldown ist beendet.\n<t:{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}:F>",
-                    color = 0x2ECC71,
+                    description = $"{description}\n<t:{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}:F>",
+                    color,
                     thumbnail = string.IsNullOrWhiteSpace(account.AvatarUrl) ? null : new { url = account.AvatarUrl },
                     fields = new[]
                     {
@@ -49,11 +61,23 @@ internal sealed class DiscordWebhookNotifier
             }
         };
 
-        using var response = await _httpClient.PostAsJsonAsync(webhookUrl, payload, cancellationToken);
-        if (response.IsSuccessStatusCode) return true;
+        try
+        {
+            using var response = await _httpClient.PostAsJsonAsync(webhookUrl, payload, cancellationToken);
+            if (response.IsSuccessStatusCode) return true;
 
-        NfaLoader.Services.AppLog.Warn($"Discord webhook rejected a cooldown notification ({(int)response.StatusCode}).");
-        return false;
+            NfaLoader.Services.AppLog.Warn($"Discord webhook rejected an account event ({(int)response.StatusCode}).");
+            return false;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            NfaLoader.Services.AppLog.Warn($"Discord account event failed ({exception.GetType().Name}).");
+            return false;
+        }
     }
 
     private static object Field(string name, string value, bool inline) => new

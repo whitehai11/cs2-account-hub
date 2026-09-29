@@ -22,6 +22,7 @@ builder.Services.AddSingleton<TokenProtector>();
 builder.Services.AddSingleton<WebSessionService>();
 builder.Services.AddSingleton<ISteamAccountGateway, SteamGateway>();
 builder.Services.AddHostedService<OperationWorker>();
+builder.Services.AddHostedService<AccountCheckScheduler>();
 builder.Services.AddHttpClient<DiscordWebhookNotifier>();
 builder.Services.AddHostedService<CooldownNotificationWorker>();
 builder.Services.AddHostedService<ProfileEnrichmentWorker>();
@@ -291,7 +292,7 @@ internal static class RequestValidation
     {
         return request.Command switch
         {
-            AccountCommand.RefreshStatus or AccountCommand.ClearWorkshop => IsEmptyPayload(request.Payload),
+            AccountCommand.RefreshStatus or AccountCommand.ClearWorkshop or AccountCommand.SyncLoadout => IsEmptyPayload(request.Payload),
             AccountCommand.ApplyLoadout => TryDeserialize(request.Payload, out LoadoutPresetDto? loadout) && loadout is not null && IsValidLoadout(loadout),
             AccountCommand.Personalize => TryDeserialize(request.Payload, out PersonalizePresetDto? personalize) && personalize is not null && IsValidPersonalize(personalize),
             _ => false,
@@ -506,6 +507,19 @@ internal sealed class AccountStore
         }
     }
 
+    public void SetNextChecks(IReadOnlyDictionary<Guid, DateTimeOffset> updates)
+    {
+        if (updates.Count == 0) return;
+        lock (_gate)
+        {
+            foreach (var (id, nextCheck) in updates)
+            {
+                if (_accounts.TryGetValue(id, out var account)) account.NextCheckUtc = nextCheck;
+            }
+            SaveUnsafe();
+        }
+    }
+
     private void SaveUnsafe()
     {
         var temporaryPath = _path + ".tmp";
@@ -534,6 +548,16 @@ internal sealed class OperationStore
     {
         lock (_gate) return _operations.GetValueOrDefault(id);
     }
+
+    public bool HasActiveForAccount(Guid accountId)
+    {
+        lock (_gate)
+        {
+            return _operations.Values.Any(operation =>
+                operation.AccountId == accountId &&
+                operation.State is OperationState.Queued or OperationState.Running);
+        }
+    }
 }
 
 internal sealed class OperationQueue
@@ -551,14 +575,16 @@ internal sealed class OperationWorker : BackgroundService
     private readonly OperationStore _operations;
     private readonly AccountStore _accounts;
     private readonly ISteamAccountGateway _gateway;
+    private readonly DiscordWebhookNotifier _notifier;
     private readonly ILogger<OperationWorker> _logger;
 
-    public OperationWorker(OperationQueue queue, OperationStore operations, AccountStore accounts, ISteamAccountGateway gateway, ILogger<OperationWorker> logger)
+    public OperationWorker(OperationQueue queue, OperationStore operations, AccountStore accounts, ISteamAccountGateway gateway, DiscordWebhookNotifier notifier, ILogger<OperationWorker> logger)
     {
         _queue = queue;
         _operations = operations;
         _accounts = accounts;
         _gateway = gateway;
+        _notifier = notifier;
         _logger = logger;
     }
 
@@ -570,10 +596,21 @@ internal sealed class OperationWorker : BackgroundService
             if (operation is null) continue;
 
             operation.State = OperationState.Running;
+            AccountRecord? account = null;
+            string? previousHealth = null;
+            bool? previousInMatch = null;
+            int? previousLoadoutMismatches = null;
+            var previousCooldownActive = false;
+            var previousCooldownNotificationSent = false;
             try
             {
-                var account = _accounts.Get(operation.AccountId)
+                account = _accounts.Get(operation.AccountId)
                     ?? throw new InvalidOperationException("Account no longer exists.");
+                previousHealth = account.HealthStatus;
+                previousInMatch = account.InMatch;
+                previousLoadoutMismatches = account.LoadoutMismatchCount;
+                previousCooldownActive = account.CooldownSeconds is > 0 || account.CooldownEndsUtc > DateTimeOffset.UtcNow;
+                previousCooldownNotificationSent = account.CooldownNotificationSent;
 
                 var result = await _gateway.ExecuteAsync(account, operation.Command, operation.Payload, stoppingToken);
                 if (result.Status is not null)
@@ -583,6 +620,35 @@ internal sealed class OperationWorker : BackgroundService
                     account.StatusUpdatedUtc = DateTimeOffset.UtcNow;
                     account.LastLoginUtc = DateTimeOffset.UtcNow;
                     _accounts.Upsert(account);
+
+                    if (previousHealth is not null && !string.Equals(previousHealth, account.HealthStatus, StringComparison.Ordinal))
+                    {
+                        await NotifyEventAsync(account, "GC-Gesundheit geändert", $"Neuer Zustand: {account.HealthStatus}.", 0xF1C40F, stoppingToken);
+                    }
+                    if (previousInMatch is not null && previousInMatch != account.InMatch)
+                    {
+                        await NotifyEventAsync(account, "Steam-Präsenz geändert", account.InMatch == true ? "Der Account ist in einem CS2-Match." : "Der Account ist nicht mehr in einem CS2-Match.", 0x3498DB, stoppingToken);
+                    }
+                    if (previousCooldownActive && result.Status.HasCooldownData && !result.Status.HasCooldown && !previousCooldownNotificationSent)
+                    {
+                        if (await _notifier.SendCooldownDoneAsync(account, stoppingToken))
+                        {
+                            account.CooldownNotificationSent = true;
+                            _accounts.Upsert(account);
+                        }
+                    }
+                }
+                if (result.Loadout is not null)
+                {
+                    account.CurrentLoadoutT = new Dictionary<uint, uint>(result.Loadout.T);
+                    account.CurrentLoadoutCt = new Dictionary<uint, uint>(result.Loadout.Ct);
+                    account.LoadoutMismatchCount = result.Loadout.MismatchCount;
+                    account.LoadoutCheckedUtc = result.Loadout.CheckedUtc;
+                    _accounts.Upsert(account);
+                    if (previousLoadoutMismatches is not null && previousLoadoutMismatches != account.LoadoutMismatchCount)
+                    {
+                        await NotifyEventAsync(account, "Loadout-Abgleich geändert", $"Aktuell sind {account.LoadoutMismatchCount ?? 0} Slot-Abweichungen vorhanden.", 0x9B59B6, stoppingToken);
+                    }
                 }
                 operation.State = result.Success ? OperationState.Succeeded : OperationState.Failed;
                 operation.Message = result.Message;
@@ -593,6 +659,18 @@ internal sealed class OperationWorker : BackgroundService
             }
             catch (Exception ex)
             {
+                if (account is null) account = _accounts.Get(operation.AccountId);
+                if (account is not null)
+                {
+                    account.LastCheckUtc = DateTimeOffset.UtcNow;
+                    account.HealthStatus = $"error:{ex.GetType().Name}";
+                    account.LastCheckError = ex.GetType().Name;
+                    _accounts.Upsert(account);
+                    if (previousHealth is not null && !string.Equals(previousHealth, account.HealthStatus, StringComparison.Ordinal))
+                    {
+                        await NotifyEventAsync(account, "GC-Check fehlgeschlagen", $"Technischer Fehler: {ex.GetType().Name}.", 0xE74C3C, CancellationToken.None);
+                    }
+                }
                 operation.State = OperationState.Failed;
                 operation.Message = "The operation failed. Check the server logs for details.";
                 _logger.LogError("Operation {OperationId} failed with {ExceptionType}.", operation.Id, ex.GetType().Name);
@@ -602,6 +680,12 @@ internal sealed class OperationWorker : BackgroundService
                 operation.CompletedUtc = DateTimeOffset.UtcNow;
             }
         }
+    }
+
+    private async Task NotifyEventAsync(AccountRecord account, string title, string description, int color, CancellationToken cancellationToken)
+    {
+        if (!_notifier.IsConfigured) return;
+        await _notifier.SendAccountEventAsync(account, title, description, color, cancellationToken);
     }
 }
 
@@ -630,10 +714,13 @@ internal interface ISteamAccountGateway
     Task<GatewayResult> ExecuteAsync(AccountRecord account, AccountCommand command, object? payload, CancellationToken cancellationToken);
 }
 
-internal sealed record GatewayResult(bool Success, string Message, NfaLoader.Models.CsPremierScoreResult? Status = null, AccountPrimeBucket? Prime = null)
+internal sealed record GatewayResult(bool Success, string Message, NfaLoader.Models.CsPremierScoreResult? Status = null, AccountPrimeBucket? Prime = null, NfaLoader.Models.CsLoadoutSnapshot? Loadout = null)
 {
     public static GatewayResult WithStatus(bool success, string message, NfaLoader.Models.CsPremierScoreResult status, AccountPrimeBucket prime) =>
         new(success, message, status, prime);
+
+    public static GatewayResult WithLoadout(bool success, string message, NfaLoader.Models.CsLoadoutSnapshot loadout) =>
+        new(success, message, null, null, loadout);
 }
 
 internal sealed class AuthSessionStore
@@ -768,6 +855,17 @@ internal sealed class AccountRecord
     public bool? VacBanned { get; set; }
     public string? Note { get; set; }
     public DateTimeOffset? StatusUpdatedUtc { get; set; }
+    public DateTimeOffset? NextCheckUtc { get; set; }
+    public DateTimeOffset? LastCheckUtc { get; set; }
+    public DateTimeOffset? GcConnectedUtc { get; set; }
+    public DateTimeOffset? CooldownVerifiedUtc { get; set; }
+    public string? HealthStatus { get; set; }
+    public string? LastCheckError { get; set; }
+    public bool? InMatch { get; set; }
+    public int? LoadoutMismatchCount { get; set; }
+    public DateTimeOffset? LoadoutCheckedUtc { get; set; }
+    public Dictionary<uint, uint> CurrentLoadoutT { get; set; } = new();
+    public Dictionary<uint, uint> CurrentLoadoutCt { get; set; } = new();
 
     public void ApplyStatus(NfaLoader.Models.CsPremierScoreResult status, AccountPrimeBucket? prime = null)
     {
@@ -778,6 +876,12 @@ internal sealed class AccountRecord
         CooldownSeconds = status.PenaltySeconds;
         CooldownReason = status.PenaltyReason;
         VacBanned = status.GcVacBannedOrUnknown;
+        InMatch = status.InMatch;
+        LastCheckUtc = now;
+        GcConnectedUtc = now;
+        CooldownVerifiedUtc = status.HasCooldownData ? now : null;
+        HealthStatus = status.HasCooldownData ? "healthy" : "gc-unknown";
+        LastCheckError = null;
 
         if (status.HasCooldown)
         {
@@ -788,6 +892,11 @@ internal sealed class AccountRecord
             }
 
             CooldownEndsUtc = candidateEnd;
+        }
+        else if (status.HasCooldownData)
+        {
+            CooldownEndsUtc = null;
+            CooldownNotificationSent = false;
         }
 
         if (prime is not null && prime != AccountPrimeBucket.Unknown) Prime = prime.Value;
@@ -844,10 +953,28 @@ internal static class AccountMappings
     public static AccountSummaryDto ToSummary(AccountRecord account) => new(
         account.Id, account.SteamId, account.PersonaName, account.AvatarUrl, account.Prime, account.Section,
         account.PremierRating, account.Cs2Level, account.LastLoginUtc, account.CooldownSeconds,
-        account.CooldownReason, account.VacBanned, account.Note, account.StatusUpdatedUtc, account.CooldownEndsUtc);
+        account.CooldownReason, account.VacBanned, account.Note, account.StatusUpdatedUtc, account.CooldownEndsUtc)
+    {
+        NextCheckUtc = account.NextCheckUtc,
+        LastCheckUtc = account.LastCheckUtc,
+        HealthStatus = account.HealthStatus,
+        InMatch = account.InMatch,
+        LoadoutMismatchCount = account.LoadoutMismatchCount,
+        LoadoutCheckedUtc = account.LoadoutCheckedUtc,
+    };
 
     public static AccountDetailDto ToDetail(AccountRecord account) => new(
         account.Id, account.SteamId, account.PersonaName, account.AvatarUrl, account.Prime, account.Section,
         account.PremierRating, account.PremierWins, account.Cs2Level, account.LastLoginUtc,
-        account.CooldownSeconds, account.CooldownReason, account.VacBanned, account.Note, account.StatusUpdatedUtc, account.CooldownEndsUtc);
+        account.CooldownSeconds, account.CooldownReason, account.VacBanned, account.Note, account.StatusUpdatedUtc, account.CooldownEndsUtc)
+    {
+        NextCheckUtc = account.NextCheckUtc,
+        LastCheckUtc = account.LastCheckUtc,
+        HealthStatus = account.HealthStatus,
+        InMatch = account.InMatch,
+        LoadoutMismatchCount = account.LoadoutMismatchCount,
+        LoadoutCheckedUtc = account.LoadoutCheckedUtc,
+        CurrentLoadoutT = new Dictionary<uint, uint>(account.CurrentLoadoutT),
+        CurrentLoadoutCt = new Dictionary<uint, uint>(account.CurrentLoadoutCt),
+    };
 }
