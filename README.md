@@ -70,7 +70,7 @@ Use new random values when rotating access: edit `.env`, then run `docker compos
 
 The browser dashboard contains Play Ready and Not Play Ready account lists, Prime filters, status refresh, Workshop clearing, server-side Loadout and Personalize presets, account notes and operation confirmations. AutoExec is intentionally not part of the application.
 
-Cooldown notifications are optional. Set `CS2_HUB_DISCORD_WEBHOOK_URL` only in the server's `.env`; the worker sends one notification when the estimated cooldown end is reached and persists the sent state. Never commit or paste a webhook URL into GitHub or chat. If a webhook URL is exposed, revoke it in Discord immediately and create a new one.
+Cooldown and login-health notifications are optional. Set `CS2_HUB_DISCORD_WEBHOOK_URL` only in the server's `.env`; the worker sends one notification when the estimated cooldown end is reached and persists the sent state. If Steam rejects an account's saved session, the account is marked as requiring re-authentication and the webhook sends one explicit `@everyone` alert for that incident. A successful re-login clears the alert state so a later expiry can notify again. Never commit or paste a webhook URL into GitHub or chat. If a webhook URL is exposed, revoke it in Discord immediately and create a new one.
 
 Status checks are staggered per account by default. `CS2_HUB_CHECK_INTERVAL_MINUTES` controls the base interval (default `30`, allowed range `5` to `1440`); each account receives a stable time offset and checks run through one server-side queue to avoid CM bursts and unnecessary 429 responses.
 

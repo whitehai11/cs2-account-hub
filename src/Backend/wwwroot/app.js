@@ -21,7 +21,7 @@ async function api(path, options = {}) {
 function enumName(value, names) { return typeof value === 'number' ? names[value] : value; }
 function primeName(value) { return enumName(value, ['Unknown', 'Prime', 'NonPrime']) || 'Unknown'; }
 function sectionName(value) { return enumName(value, ['PlayReady', 'NotPlayReady']) || 'NotPlayReady'; }
-function healthLabel(value) { return value === 'healthy' ? 'GC gesund' : value === 'gc-unknown' ? 'GC unvollständig' : value?.startsWith('error:') ? 'GC-Fehler' : 'Noch nicht geprüft'; }
+function healthLabel(value) { return value === 'healthy' ? 'GC gesund' : value === 'gc-unknown' ? 'GC unvollständig' : value === 'login-required' ? 'Steam-Login erneut erforderlich' : value?.startsWith('error:') ? 'GC-Fehler' : 'Noch nicht geprüft'; }
 function presenceLabel(account) { return account.inMatch === true ? 'In CS2-Match' : account.inMatch === false ? 'Nicht im Match' : 'Unbekannt'; }
 function formatDate(value) { return value ? new Date(value).toLocaleString('de-DE') : '—'; }
 function relativeTime(value, now = Date.now()) {
@@ -104,6 +104,7 @@ function avatarMarkup(account, size = '') {
 }
 function accountAttention(account) {
   if (account.vacBanned === true) return ['critical', 'VAC-Status', 'Sofort prüfen'];
+  if (account.loginRequiresReauthentication) return ['critical', 'Steam-Login abgelaufen', 'Neu anmelden'];
   if (remainingSeconds(account) > 0) return ['warning', 'Cooldown aktiv', duration(account)];
   if (account.healthStatus && account.healthStatus !== 'healthy') return ['warning', healthLabel(account.healthStatus), 'GC-Check wiederholen'];
   if (account.loadoutMismatchCount > 0) return ['info', 'Loadout-Diff', `${account.loadoutMismatchCount} Abweichungen`];
@@ -212,8 +213,8 @@ function renderAccounts() {
   $('accountList').innerHTML = list.length ? list.map(account => `
     <button class="account-row ${state.selected?.id === account.id ? 'selected' : ''}" data-id="${account.id}">
       <span class="avatar">${avatarMarkup(account)}</span>
-      <span class="account-main"><span class="account-name">${esc(account.personaName || 'Unbekannter Account')} ${account.isPermaGreen ? '<span class="perma-badge">PERMA-GREEN</span>' : ''}</span><span class="account-meta">${esc(account.accountName || 'Anmeldename unbekannt')} · ${esc(account.steamId)} · ${primeName(account.prime)} · ${healthLabel(account.healthStatus)}</span>${account.nextCooldownSeconds ? `<span class="account-next-cooldown">Nächster Cooldown: ${nextCooldownText(account)}</span>` : ''}</span>
-      <span class="status-pill ${sectionName(account.section) === 'PlayReady' ? '' : 'bad'}">${sectionName(account.section) === 'PlayReady' ? 'Ready' : 'Nicht ready'}</span>
+      <span class="account-main"><span class="account-name">${esc(account.personaName || 'Unbekannter Account')} ${account.isPermaGreen ? '<span class="perma-badge">PERMA-GREEN</span>' : ''}</span><span class="account-meta">${esc(account.accountName || 'Anmeldename unbekannt')} · ${esc(account.steamId)} · ${primeName(account.prime)} · ${healthLabel(account.healthStatus)}</span>${account.loginRequiresReauthentication ? '<span class="account-login-warning">Steam-Login erneut erforderlich</span>' : ''}${account.nextCooldownSeconds ? `<span class="account-next-cooldown">Nächster Cooldown: ${nextCooldownText(account)}</span>` : ''}</span>
+      <span class="status-pill ${account.loginRequiresReauthentication || sectionName(account.section) !== 'PlayReady' ? 'bad' : ''}">${account.loginRequiresReauthentication ? 'Login nötig' : sectionName(account.section) === 'PlayReady' ? 'Ready' : 'Nicht ready'}</span>
     </button>`).join('') : '<div class="empty">Keine Accounts in dieser Kategorie.</div>';
   document.querySelectorAll('.account-row').forEach(row => row.addEventListener('click', () => selectAccount(row.dataset.id)));
 }
@@ -232,7 +233,8 @@ function renderDetails() {
   $('emptyDetails').classList.add('hidden'); $('accountDetails').classList.remove('hidden');
   $('accountDetails').innerHTML = `
     <div class="details">
-      <div class="detail-head"><span class="avatar avatar-large">${avatarMarkup(account, 'large')}</span><div class="detail-identity"><h3>${esc(account.personaName || 'Unbekannter Account')}</h3><span class="muted">Anmeldename: ${esc(account.accountName || 'unbekannt')} · Steam-ID: ${esc(account.steamId)}</span><div class="status-badges"><span class="badge ${sectionName(account.section) === 'PlayReady' ? 'good' : 'bad'}">${sectionName(account.section) === 'PlayReady' ? 'Play Ready' : 'Not Play Ready'}</span><span class="badge">${primeName(account.prime)}</span><span class="badge ${account.inMatch ? 'live' : ''}">${presenceLabel(account)}</span>${account.publicPlayingCs2 ? '<span class="badge live">CS2 erkannt</span>' : ''}${account.monitoringPaused ? '<span class="badge perma-badge">CHECKS PAUSIERT</span>' : ''}${account.isPermaGreen ? '<span class="badge perma-badge">PERMA-GREEN</span>' : ''}</div></div></div>
+      <div class="detail-head"><span class="avatar avatar-large">${avatarMarkup(account, 'large')}</span><div class="detail-identity"><h3>${esc(account.personaName || 'Unbekannter Account')}</h3><span class="muted">Anmeldename: ${esc(account.accountName || 'unbekannt')} · Steam-ID: ${esc(account.steamId)}</span><div class="status-badges"><span class="badge ${account.loginRequiresReauthentication ? 'bad' : sectionName(account.section) === 'PlayReady' ? 'good' : 'bad'}">${account.loginRequiresReauthentication ? 'Login erneut nötig' : sectionName(account.section) === 'PlayReady' ? 'Play Ready' : 'Not Play Ready'}</span><span class="badge">${primeName(account.prime)}</span><span class="badge ${account.inMatch ? 'live' : ''}">${presenceLabel(account)}</span>${account.publicPlayingCs2 ? '<span class="badge live">CS2 erkannt</span>' : ''}${account.monitoringPaused ? '<span class="badge perma-badge">CHECKS PAUSIERT</span>' : ''}${account.isPermaGreen ? '<span class="badge perma-badge">PERMA-GREEN</span>' : ''}</div></div></div>
+      ${account.loginRequiresReauthentication ? `<div class="login-required-alert"><strong>Steam-Login erneut erforderlich</strong><span>Die gespeicherte Session für <b>${esc(account.accountName || account.personaName || account.steamId)}</b> wurde abgewiesen. Aktualisiere den Login, um automatische Checks und Aktionen fortzusetzen.</span><button id="reauthenticateAlertButton" class="danger-action">Jetzt neu anmelden</button></div>` : ''}
       <div class="health-grid"><div class="health-card"><small>GC-Verbindung</small><strong>${healthLabel(account.healthStatus)}</strong><span>${formatDate(account.lastCheckUtc || account.statusUpdatedUtc)}</span></div><div class="health-card"><small>Cooldown</small><strong class="${remainingSeconds(account) > 0 ? 'warning-text' : ''}">${cooldownPhase(account)}</strong><span>${duration(account)}</span></div><div class="health-card"><small>Loadout</small><strong>${account.loadoutMismatchCount ?? '—'}</strong><span>${account.loadoutCheckedUtc ? `geprüft ${relativeTime(account.loadoutCheckedUtc)}` : 'noch nicht geprüft'}</span></div></div>
       <div class="stat-grid"><div class="stat"><small>Premier Rating</small><strong>${account.premierRating ?? '—'}</strong></div><div class="stat"><small>CS2 Level</small><strong>${account.cs2Level ?? '—'}</strong></div></div>
       ${renderRatingTrend(account)}
@@ -244,6 +246,7 @@ function renderDetails() {
     </div>`;
   $('saveNote').addEventListener('click', saveNote);
   $('refreshLoginButton').addEventListener('click', () => openAuthDialog(account));
+  $('reauthenticateAlertButton')?.addEventListener('click', () => openAuthDialog(account));
   $('permaGreenButton').addEventListener('click', togglePermaGreen);
   $('monitoringButton').addEventListener('click', toggleMonitoring);
   $('deleteAccountButton').addEventListener('click', deleteSelectedAccount);

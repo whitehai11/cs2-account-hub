@@ -65,6 +65,7 @@ public sealed class AccountSummaryDto
     public DateTimeOffset? NextCheckUtc { get; set; }
     public DateTimeOffset? LastCheckUtc { get; set; }
     public string? HealthStatus { get; set; }
+    public bool LoginRequiresReauthentication { get; set; }
     public bool? InMatch { get; set; }
     public bool? PublicPlayingCs2 { get; set; }
     public int? LoadoutMismatchCount { get; set; }
@@ -103,6 +104,7 @@ public sealed class AccountDetailDto
     public DateTimeOffset? NextCheckUtc { get; set; }
     public DateTimeOffset? LastCheckUtc { get; set; }
     public string? HealthStatus { get; set; }
+    public bool LoginRequiresReauthentication { get; set; }
     public bool? InMatch { get; set; }
     public bool? PublicPlayingCs2 { get; set; }
     public int? LoadoutMismatchCount { get; set; }

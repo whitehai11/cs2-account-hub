@@ -21,12 +21,22 @@ internal sealed class DiscordWebhookNotifier
             0x2ECC71,
             cancellationToken);
 
+    public Task<bool> SendReauthenticationRequiredAsync(AccountRecord account, CancellationToken cancellationToken) =>
+        SendAccountEventAsync(
+            account,
+            $"Steam-Login erneut erforderlich: {account.PersonaName ?? account.AccountName ?? account.SteamId}",
+            "Die gespeicherte Steam-Session wurde von Steam abgewiesen oder ist abgelaufen. Bitte diesen Account neu anmelden.",
+            0xE74C3C,
+            cancellationToken,
+            mentionEveryone: true);
+
     public async Task<bool> SendAccountEventAsync(
         AccountRecord account,
         string title,
         string description,
         int color,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool mentionEveryone = false)
     {
         var webhookUrl = TryGetWebhookUrl();
         if (webhookUrl is null) return false;
@@ -34,7 +44,8 @@ internal sealed class DiscordWebhookNotifier
         var payload = new
         {
             username = "CS2 Account Hub",
-            allowed_mentions = new { parse = Array.Empty<string>() },
+            content = mentionEveryone ? "@everyone" : null,
+            allowed_mentions = new { parse = mentionEveryone ? new[] { "everyone" } : Array.Empty<string>() },
             embeds = new[]
             {
                 new
@@ -46,6 +57,7 @@ internal sealed class DiscordWebhookNotifier
                     fields = new[]
                     {
                         Field("Account", account.PersonaName ?? "Unbekannt", true),
+                        Field("Anmeldename", account.AccountName ?? "Unbekannt", true),
                         Field("Steam-ID", account.SteamId, true),
                         Field("Prime", account.Prime.ToString(), true),
                         Field("Premier Rating", account.PremierRating?.ToString() ?? "—", true),

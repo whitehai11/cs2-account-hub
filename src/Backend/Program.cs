@@ -883,11 +883,19 @@ internal sealed class OperationWorker : BackgroundService
                 var result = await _gateway.ExecuteAsync(account, operation.Command, operation.Payload, stoppingToken);
                 if (result.Status is not null)
                 {
+                    var loginWasRequired = account.LoginRequiresReauthentication;
                     account.ApplyStatus(result.Status, result.Prime);
+                    account.LoginRequiresReauthentication = false;
+                    account.ReauthenticationNotificationSent = false;
                     account.ApplyProfile(await _gateway.QueryProfileAsync(account.SteamId, stoppingToken));
                     account.StatusUpdatedUtc = DateTimeOffset.UtcNow;
                     account.LastLoginUtc = DateTimeOffset.UtcNow;
                     _accounts.Upsert(account);
+
+                    if (loginWasRequired)
+                    {
+                        _events.Append(account.Id, "account", "Steam-Login wieder gültig", "Die gespeicherte Steam-Session wurde erfolgreich erneuert.", "success");
+                    }
 
                     _events.Append(account.Id, "status", "Status geprüft",
                         $"{account.HealthStatus}; {account.Section}; {account.Prime}.",
@@ -956,19 +964,27 @@ internal sealed class OperationWorker : BackgroundService
                 if (account is null) account = _accounts.Get(operation.AccountId);
                 if (account is not null)
                 {
-                    account.LastCheckUtc = DateTimeOffset.UtcNow;
-                    account.HealthStatus = $"error:{ex.GetType().Name}";
-                    account.LastCheckError = ex.GetType().Name;
-                    if (operation.Command == AccountCommand.RefreshMatches)
+                    if (ex is NfaLoader.Services.SteamCmException cmException && cmException.IsTokenFailure)
                     {
-                        account.MatchesCheckedUtc = DateTimeOffset.UtcNow;
-                        account.MatchesStatus = "error";
+                        await MarkLoginRequiresReauthenticationAsync(account);
+                        _logger.LogWarning("Operation {OperationId} rejected by Steam because the login is no longer valid (Steam result {SteamResult}).", operation.Id, cmException.Result);
                     }
-                    _accounts.Upsert(account);
-                    _events.Append(account.Id, "error", "Operation fehlgeschlagen", $"{operation.Command}: {ex.GetType().Name}.", "error");
-                    if (previousHealth is not null && !string.Equals(previousHealth, account.HealthStatus, StringComparison.Ordinal))
+                    else
                     {
-                        await NotifyEventAsync(account, "GC-Check fehlgeschlagen", $"Technischer Fehler: {ex.GetType().Name}.", 0xE74C3C, CancellationToken.None);
+                        account.LastCheckUtc = DateTimeOffset.UtcNow;
+                        account.HealthStatus = $"error:{ex.GetType().Name}";
+                        account.LastCheckError = ex.GetType().Name;
+                        if (operation.Command == AccountCommand.RefreshMatches)
+                        {
+                            account.MatchesCheckedUtc = DateTimeOffset.UtcNow;
+                            account.MatchesStatus = "error";
+                        }
+                        _accounts.Upsert(account);
+                        _events.Append(account.Id, "error", "Operation fehlgeschlagen", $"{operation.Command}: {ex.GetType().Name}.", "error");
+                        if (previousHealth is not null && !string.Equals(previousHealth, account.HealthStatus, StringComparison.Ordinal))
+                        {
+                            await NotifyEventAsync(account, "GC-Check fehlgeschlagen", $"Technischer Fehler: {ex.GetType().Name}.", 0xE74C3C, CancellationToken.None);
+                        }
                     }
                 }
                 operation.State = OperationState.Failed;
@@ -986,6 +1002,28 @@ internal sealed class OperationWorker : BackgroundService
     {
         if (!_notifier.IsConfigured) return;
         await _notifier.SendAccountEventAsync(account, title, description, color, cancellationToken);
+    }
+
+    private async Task MarkLoginRequiresReauthenticationAsync(AccountRecord account)
+    {
+        var wasAlreadyRequired = account.LoginRequiresReauthentication;
+        account.LoginRequiresReauthentication = true;
+        account.HealthStatus = "login-required";
+        account.LastCheckUtc = DateTimeOffset.UtcNow;
+        account.LastCheckError = "SteamLoginExpired";
+        account.NextCheckUtc = DateTimeOffset.UtcNow.AddMinutes(10);
+        _accounts.Upsert(account);
+
+        if (!wasAlreadyRequired)
+        {
+            _events.Append(account.Id, "account", "Steam-Login erneut erforderlich", "Steam hat die gespeicherte Session abgewiesen. Bitte den Account neu anmelden.", "error");
+        }
+
+        if (!account.ReauthenticationNotificationSent && await _notifier.SendReauthenticationRequiredAsync(account, CancellationToken.None))
+        {
+            account.ReauthenticationNotificationSent = true;
+            _accounts.Upsert(account);
+        }
     }
 
     private static string CommandTitle(AccountCommand command) => command switch
@@ -1116,6 +1154,8 @@ internal sealed class AuthSessionStore
 
             account.AccountName = result.AccountName;
             account.ProtectedRefreshToken = _tokens.Protect(result.RefreshToken);
+            account.LoginRequiresReauthentication = false;
+            account.ReauthenticationNotificationSent = false;
             account.LastLoginUtc = DateTimeOffset.UtcNow;
             account.HealthStatus = "status-pending";
             account.LastCheckError = null;
@@ -1290,6 +1330,8 @@ internal sealed class AccountRecord
     public string? AccountName { get; set; }
     public string SteamId { get; init; } = "";
     public string? ProtectedRefreshToken { get; set; }
+    public bool LoginRequiresReauthentication { get; set; }
+    public bool ReauthenticationNotificationSent { get; set; }
     public string? PersonaName { get; set; }
     public string? AvatarUrl { get; set; }
     public AccountPrimeBucket Prime { get; set; } = AccountPrimeBucket.Unknown;
@@ -1434,6 +1476,7 @@ internal static class AccountMappings
         NextCheckUtc = account.NextCheckUtc,
         LastCheckUtc = account.LastCheckUtc,
         HealthStatus = account.HealthStatus,
+        LoginRequiresReauthentication = account.LoginRequiresReauthentication,
         InMatch = account.InMatch,
         PublicPlayingCs2 = account.PublicPlayingCs2,
         LoadoutMismatchCount = account.LoadoutMismatchCount,
@@ -1451,6 +1494,7 @@ internal static class AccountMappings
         NextCheckUtc = account.NextCheckUtc,
         LastCheckUtc = account.LastCheckUtc,
         HealthStatus = account.HealthStatus,
+        LoginRequiresReauthentication = account.LoginRequiresReauthentication,
         InMatch = account.InMatch,
         PublicPlayingCs2 = account.PublicPlayingCs2,
         LoadoutMismatchCount = account.LoadoutMismatchCount,
