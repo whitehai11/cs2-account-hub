@@ -87,18 +87,9 @@ internal sealed class SteamMailService
 
     private static async Task<string> ReadTextBodyAsync(IMailFolder folder, IMessageSummary summary, CancellationToken cancellationToken)
     {
-        var textPart = summary.BodyParts?
-            .Where(part => part is BodyPartBasic basic && basic.ContentType.MimeType.Equals("text/plain", StringComparison.OrdinalIgnoreCase))
-            .OrderBy(part => part.PartSpecifier?.Count(character => character == '.') ?? 0)
-            .FirstOrDefault();
-
-        if (textPart is BodyPartBasic basicPart)
-        {
-            var entity = await folder.GetBodyPartAsync(summary.UniqueId, basicPart, cancellationToken);
-            return NormalizeBody(entity is TextPart text ? text.Text : entity.ToString());
-        }
-
-        return string.Empty;
+        if (summary.TextBody is not { } textPart) return string.Empty;
+        var entity = await folder.GetBodyPartAsync(summary.UniqueId, textPart, cancellationToken);
+        return NormalizeBody(entity is TextPart text ? text.Text : entity.ToString());
     }
 
     private static bool IsAllowedSender(string sender, IReadOnlyList<string> configured)
