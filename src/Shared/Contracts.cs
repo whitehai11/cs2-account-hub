@@ -205,6 +205,20 @@ public sealed record StartAuthResponse(
 
 public sealed record SubmitGuardCodeRequest(string Code);
 
+public sealed record SteamAuthenticatorSummaryDto(
+    Guid Id,
+    string AccountName,
+    Guid? LinkedAccountId,
+    string? LinkedDisplayName,
+    DateTimeOffset ImportedUtc);
+
+public sealed record SteamAuthenticatorCodeDto(
+    Guid Id,
+    string AccountName,
+    string Code,
+    int SecondsRemaining,
+    DateTimeOffset GeneratedUtc);
+
 public sealed record OperationDto(
     Guid Id,
     Guid AccountId,

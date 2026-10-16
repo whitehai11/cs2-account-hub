@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Security.Cryptography;
@@ -24,6 +25,9 @@ builder.Services.AddDataProtection()
     .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(dataDirectory, "keys")))
     .SetApplicationName("CS2AccountHub");
 builder.Services.AddSingleton<TokenProtector>();
+builder.Services.AddSingleton<SecretProtector>();
+builder.Services.AddSingleton<SteamAuthenticatorCodeService>();
+builder.Services.AddSingleton<SteamAuthenticatorStore>();
 builder.Services.AddSingleton<WebSessionService>();
 builder.Services.AddSingleton<SteamPublicProfileService>();
 builder.Services.AddSingleton<ISteamAccountGateway, SteamGateway>();
@@ -72,6 +76,15 @@ builder.Services.AddRateLimiter(options =>
         _ => new FixedWindowRateLimiterOptions
         {
             PermitLimit = 900,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
+            AutoReplenishment = true,
+        }));
+    options.AddPolicy("authenticator-code", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 60,
             Window = TimeSpan.FromMinutes(1),
             QueueLimit = 0,
             AutoReplenishment = true,
@@ -275,6 +288,56 @@ app.MapPatch("/api/mail/{id:guid}/read", (Guid id, MarkMailReadRequest request, 
 {
     return mail.MarkRead(id, request.IsRead) ? Results.NoContent() : Results.NotFound();
 });
+
+app.MapGet("/api/authenticators", (SteamAuthenticatorStore authenticators, AccountStore accounts) =>
+    Results.Ok(authenticators.List(accounts)));
+
+app.MapPost("/api/authenticators/import", async (HttpRequest request, SteamAuthenticatorStore authenticators, CancellationToken cancellationToken) =>
+{
+    if (!request.HasFormContentType)
+    {
+        return Results.BadRequest(new { message = "Bitte eine MAFile als Formular-Datei hochladen." });
+    }
+
+    var form = await request.ReadFormAsync(cancellationToken);
+    var file = form.Files.GetFile("maFile");
+    if (file is null || file.Length == 0)
+    {
+        return Results.BadRequest(new { message = "Keine MAFile ausgewählt." });
+    }
+
+    if (file.Length > 256 * 1024)
+    {
+        return Results.BadRequest(new { message = "Die MAFile ist zu groß." });
+    }
+
+    try
+    {
+        using var reader = new StreamReader(file.OpenReadStream(), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        var json = await reader.ReadToEndAsync(cancellationToken);
+        var result = authenticators.Import(json);
+        return Results.Ok(new { id = result.Id, accountName = result.AccountName, updated = result.Updated });
+    }
+    catch (JsonException)
+    {
+        return Results.UnprocessableEntity(new { message = "Die MAFile ist ungültig oder verschlüsselt. Bitte eine entschlüsselte JSON-MAFile verwenden." });
+    }
+    catch (FormatException exception)
+    {
+        return Results.UnprocessableEntity(new { message = exception.Message });
+    }
+}).RequireRateLimiting("steam-auth");
+
+app.MapPost("/api/authenticators/{id:guid}/code", async (Guid id, SteamAuthenticatorStore authenticators, CancellationToken cancellationToken) =>
+{
+    var code = await authenticators.GenerateCodeAsync(id, cancellationToken);
+    return code is null
+        ? Results.NotFound(new { message = "Authenticator nicht gefunden oder nicht lesbar." })
+        : Results.Ok(code);
+}).RequireRateLimiting("authenticator-code");
+
+app.MapDelete("/api/authenticators/{id:guid}", (Guid id, SteamAuthenticatorStore authenticators) =>
+    authenticators.Delete(id) ? Results.NoContent() : Results.NotFound());
 
 app.MapGet("/api/settings/loadout", (SettingsStore settings) => Results.Ok(settings.GetLoadout()));
 app.MapPut("/api/settings/loadout", (LoadoutPresetDto request, SettingsStore settings) =>
@@ -958,13 +1021,15 @@ internal sealed class AuthSessionStore
     private readonly TokenProtector _tokens;
     private readonly AccountEventStore _events;
     private readonly SteamMailService _mail;
+    private readonly SteamAuthenticatorStore _authenticators;
     private readonly ILogger<AuthSessionStore> _logger;
 
-    public AuthSessionStore(TokenProtector tokens, AccountEventStore events, SteamMailService mail, ILogger<AuthSessionStore> logger)
+    public AuthSessionStore(TokenProtector tokens, AccountEventStore events, SteamMailService mail, SteamAuthenticatorStore authenticators, ILogger<AuthSessionStore> logger)
     {
         _tokens = tokens;
         _events = events;
         _mail = mail;
+        _authenticators = authenticators;
         _logger = logger;
     }
 
@@ -1125,6 +1190,20 @@ internal sealed class AuthSessionStore
             ? AuthState.AwaitingConfirmation
             : AuthState.AwaitingSteamGuard;
         session.PromptMessage = prompt.AssociatedMessage ?? "Steam Guard confirmation required.";
+
+        if (prompt.Type == NfaLoader.Services.SteamGuardType.DeviceCode)
+        {
+            session.PromptMessage = "Steam Guard-Code wird aus der verknüpften MAFile generiert ...";
+            var authenticatorCode = await _authenticators.TryGenerateCodeForAccountAsync(session.AccountName, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(authenticatorCode))
+            {
+                session.PromptMessage = "Steam Guard-Code aus MAFile erkannt. Anmeldung wird automatisch fortgesetzt ...";
+                _logger.LogInformation("Steam auth session {SessionId} found an automatic device code after matching the account name.", session.Id);
+                return authenticatorCode;
+            }
+
+            session.PromptMessage = "Steam Guard-Code eingeben. Keine passende MAFile wurde gefunden.";
+        }
 
         if (prompt.Type == NfaLoader.Services.SteamGuardType.EmailCode)
         {

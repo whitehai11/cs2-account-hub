@@ -66,8 +66,11 @@ internal sealed class SteamCredentialsAuthService
         var steamId = begin.SteamId;
 
         // Types that need a code (email/mobile authenticator) ask for the code and submit it first; types that only need a confirm tap on the phone or in the email go straight to polling.
-        var codeType = begin.AllowedConfirmations.FirstOrDefault(
-            c => c is SteamGuardType.EmailCode or SteamGuardType.DeviceCode);
+        var codeType = begin.AllowedConfirmations.FirstOrDefault(c => c == SteamGuardType.DeviceCode);
+        if (codeType == default)
+        {
+            codeType = begin.AllowedConfirmations.FirstOrDefault(c => c == SteamGuardType.EmailCode);
+        }
 
         if (codeType is SteamGuardType.EmailCode or SteamGuardType.DeviceCode)
         {

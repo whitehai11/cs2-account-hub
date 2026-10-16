@@ -253,6 +253,39 @@ dialog { width: min(510px, calc(100% - 28px)); padding: 0; border: 1px solid var
 @media (max-width: 720px) { .control-hero, .mail-toolbar { display: block; } .control-actions, .mail-actions { justify-content: flex-start; margin-top: 16px; } .mail-search { width: 100%; } .mail-list-panel { min-height: 0; } .mail-detail-panel { min-height: 360px; } }
 @media (max-width: 620px) { .nav-divider { display: none; } .control-hero { padding: 18px; } .control-hero h3 { font-size: 20px; } .attention-panel, .signals-panel, .mail-list-panel, .mail-detail-panel { padding: 14px; } .mail-row { grid-template-columns: 8px 1fr; } .mail-row time { grid-column: 2; } }
 
+/* Steam Authenticator */
+.nav-icon-authenticator { border: 1.5px solid currentColor; border-radius: 50%; }
+.nav-icon-authenticator::before { content: ""; position: absolute; inset: 4px; border: 1px solid currentColor; border-radius: 50%; }
+.nav-icon-authenticator::after { content: ""; position: absolute; width: 1px; height: 5px; left: 7px; top: 2px; background: currentColor; transform-origin: 50% 7px; transform: rotate(35deg); }
+.authenticator-view { display: grid; gap: 18px; }
+.authenticator-hero { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+.authenticator-hero h3 { margin: 5px 0 4px; color: #f0f1f1; font-size: 22px; letter-spacing: -.03em; }
+.authenticator-hero p { max-width: 650px; margin: 0; font-size: 12px; }
+.authenticator-import { display: flex; align-items: flex-end; gap: 8px; min-width: min(410px, 100%); }
+.authenticator-import label { display: grid; flex: 1; gap: 6px; color: var(--muted); font-size: 10px; font-weight: 700; }
+.authenticator-import input { padding: 8px; font-size: 11px; }
+.authenticator-import button { white-space: nowrap; }
+.authenticator-panel { padding: 18px; }
+.authenticator-list { display: grid; gap: 0; margin-top: 4px; }
+.authenticator-row { display: grid; grid-template-columns: minmax(210px, 1fr) minmax(130px, .5fr) auto; gap: 18px; align-items: center; padding: 15px 4px; border-bottom: 1px solid var(--line); }
+.authenticator-row:last-child { border-bottom: 0; }
+.authenticator-identity { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.authenticator-icon { display: grid; place-items: center; width: 35px; height: 35px; flex: none; border: 1px solid #594821; border-radius: 4px; color: var(--blue); background: #252016; font: 700 9px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.authenticator-identity strong, .authenticator-identity small, .authenticator-identity time { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.authenticator-identity strong { color: #e9ecee; font-size: 12px; }
+.authenticator-identity small, .authenticator-identity time { margin-top: 3px; color: var(--muted); font-size: 10px; }
+.authenticator-identity time { color: #667176; font-size: 9px; }
+.authenticator-code { display: grid; gap: 4px; }
+.authenticator-code code { color: #edbf5e; font: 700 20px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .16em; }
+.authenticator-code small { color: #788389; font-size: 9px; }
+.authenticator-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.authenticator-actions button { padding: 7px 9px; font-size: 10px; }
+.authenticator-empty { display: grid; place-items: center; min-height: 180px; padding: 30px; color: #788389; text-align: center; }
+.authenticator-empty strong { color: #d9dddf; font-size: 13px; }
+.authenticator-empty span { max-width: 420px; margin-top: 6px; font-size: 11px; }
+@media (max-width: 850px) { .authenticator-hero { display: block; } .authenticator-import { margin-top: 16px; } .authenticator-row { grid-template-columns: 1fr auto; } .authenticator-code { grid-column: 1; } .authenticator-actions { grid-column: 2; grid-row: 1 / span 2; flex-direction: column; } }
+@media (max-width: 520px) { .authenticator-import { display: grid; } .authenticator-row { grid-template-columns: 1fr; gap: 10px; } .authenticator-code, .authenticator-actions { grid-column: auto; grid-row: auto; } .authenticator-actions { flex-direction: row; justify-content: flex-start; } }
+
 /* Editorial operations pass: flat, dense, deliberate. */
 :root {
   --bg: #0d0f11;

@@ -1,11 +1,12 @@
 const $ = (id) => document.getElementById(id);
-const state = { view: 'control', accounts: [], allAccounts: [], selected: null, authSession: null, authAccountId: null, avatarBase64: null, loadout: null, timeline: [], focusMode: false, mail: { messages: [], groups: [], selected: null, configured: false, activeGroup: 'primary', requestId: 0 } };
+const state = { view: 'control', accounts: [], allAccounts: [], selected: null, authSession: null, authAccountId: null, avatarBase64: null, loadout: null, timeline: [], focusMode: false, authenticators: [], authenticatorTimers: {}, mail: { messages: [], groups: [], selected: null, configured: false, activeGroup: 'primary', requestId: 0 } };
 
 async function api(path, options = {}) {
+  const isMultipart = options.body instanceof FormData;
   const response = await fetch(path, {
     credentials: 'same-origin',
     ...options,
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }
+    headers: { ...(isMultipart ? {} : { 'Content-Type': 'application/json' }), ...(options.headers || {}) }
   });
   if (response.status === 401) { showLogin(); throw new Error('Nicht angemeldet.'); }
   if (!response.ok) {
@@ -122,19 +123,21 @@ function setView(view) {
   document.querySelectorAll('.nav-item').forEach(item => item.classList.toggle('active', item.dataset.view === view));
   const settings = view === 'loadout' || view === 'personalize';
   const mail = view === 'mail';
+  const authenticator = view === 'authenticator';
   const control = view === 'control';
-  $('accountsView').classList.toggle('hidden', settings || control || mail);
+  $('accountsView').classList.toggle('hidden', settings || control || mail || authenticator);
   $('settingsView').classList.toggle('hidden', !settings);
   $('controlView').classList.toggle('hidden', !control);
   $('mailView').classList.toggle('hidden', !mail);
-  $('overview').classList.toggle('hidden', settings || mail);
-  $('signalBar').classList.toggle('hidden', settings || mail);
+  $('authenticatorView').classList.toggle('hidden', !authenticator);
+  $('overview').classList.toggle('hidden', settings || mail || authenticator);
+  $('signalBar').classList.toggle('hidden', settings || mail || authenticator);
   $('loadoutSettings').classList.toggle('hidden', view !== 'loadout');
   $('personalizeSettings').classList.toggle('hidden', view !== 'personalize');
-  const titles = { control: ['Mission Control', 'Alle Accounts. Alle Signale. Ein klarer nächster Schritt.'], play: ['Play Ready', 'Accounts ohne aktiven Cooldown oder VAC'], notplay: ['Not Play Ready', 'Accounts mit Cooldown, VAC oder unbekanntem Status'], mail: ['Steam Mail', 'Globaler Steam-Posteingang ohne Account-Zuordnung'], loadout: ['Loadout', 'Serverseitige Presets und Synchronisierung'], personalize: ['Personalize', 'Profil-Presets und Account-Timeline'] };
+  const titles = { control: ['Mission Control', 'Alle Accounts. Alle Signale. Ein klarer nächster Schritt.'], play: ['Play Ready', 'Accounts ohne aktiven Cooldown oder VAC'], notplay: ['Not Play Ready', 'Accounts mit Cooldown, VAC oder unbekanntem Status'], mail: ['Steam Mail', 'Globaler Steam-Posteingang ohne Account-Zuordnung'], authenticator: ['Steam Authenticator', 'MAFile-gestützte Steam-Guard-Codes mit Account-Abgleich'], loadout: ['Loadout', 'Serverseitige Presets und Synchronisierung'], personalize: ['Personalize', 'Profil-Presets und Account-Timeline'] };
   $('pageTitle').textContent = titles[view][0]; $('pageSubtitle').textContent = titles[view][1];
-  const animatedView = control ? $('controlView') : mail ? $('mailView') : settings ? $('settingsView') : $('accountsView'); animatedView.classList.remove('view-enter'); requestAnimationFrame(() => animatedView.classList.add('view-enter'));
-  if (control) loadControl(); else if (mail) loadMail(); else if (settings) loadSettings(); else loadAccounts();
+  const animatedView = control ? $('controlView') : mail ? $('mailView') : authenticator ? $('authenticatorView') : settings ? $('settingsView') : $('accountsView'); animatedView.classList.remove('view-enter'); requestAnimationFrame(() => animatedView.classList.add('view-enter'));
+  if (control) loadControl(); else if (mail) loadMail(); else if (authenticator) loadAuthenticators(); else if (settings) loadSettings(); else loadAccounts();
 }
 
 async function loadControl() {
@@ -327,6 +330,71 @@ async function loadTimeline() {
   catch (error) { toast(error.message, true); }
 }
 
+async function loadAuthenticators() {
+  try {
+    state.authenticators = await api('/api/authenticators');
+    renderAuthenticators();
+  } catch (error) { toast(error.message, true); }
+}
+
+function renderAuthenticators() {
+  const authenticators = state.authenticators || [];
+  $('authenticatorCount').textContent = authenticators.length;
+  $('authenticatorList').innerHTML = authenticators.length ? authenticators.map(authenticator => `
+    <article class="authenticator-row" data-authenticator-id="${authenticator.id}">
+      <div class="authenticator-identity"><span class="authenticator-icon">2FA</span><div><strong>${esc(authenticator.accountName)}</strong><small>${authenticator.linkedAccountId ? `Verknüpft mit ${esc(authenticator.linkedDisplayName || 'Steam-Account')}` : 'Kein passender Account im Hub gefunden'}</small><time>Importiert ${esc(formatDate(authenticator.importedUtc))}</time></div></div>
+      <div class="authenticator-code"><code id="authenticatorCode-${authenticator.id}">•••••</code><small id="authenticatorCodeMeta-${authenticator.id}">Noch nicht abgerufen</small></div>
+      <div class="authenticator-actions"><button type="button" class="primary" data-authenticator-code>Code abrufen</button><button type="button" class="danger-action" data-authenticator-delete>Entfernen</button></div>
+    </article>`).join('') : '<div class="authenticator-empty"><strong>Noch keine MAFile importiert</strong><span>Wähle oben eine entschlüsselte MAFile aus, um Steam-Guard-Codes sicher im Hub zu erzeugen.</span></div>';
+}
+
+async function fetchAuthenticatorCode(id, button) {
+  const codeElement = $(`authenticatorCode-${id}`);
+  const metaElement = $(`authenticatorCodeMeta-${id}`);
+  if (!codeElement || !metaElement) return;
+  button.disabled = true;
+  button.textContent = 'Abrufen ...';
+  try {
+    const result = await api(`/api/authenticators/${id}/code`, { method: 'POST' });
+    codeElement.textContent = result.code;
+    metaElement.textContent = `Gültig noch ${result.secondsRemaining} Sek.`;
+    clearTimeout(state.authenticatorTimers[id]);
+    state.authenticatorTimers[id] = setTimeout(() => {
+      codeElement.textContent = '•••••';
+      metaElement.textContent = 'Code abgelaufen';
+    }, Math.max(1, result.secondsRemaining) * 1000);
+  } catch (error) { toast(error.message, true); }
+  finally { button.disabled = false; button.textContent = 'Code abrufen'; }
+}
+
+async function importAuthenticator() {
+  const input = $('authenticatorFile');
+  const file = input.files?.[0];
+  if (!file) { toast('Bitte zuerst eine MAFile auswählen.', true); return; }
+  const button = $('importAuthenticatorButton');
+  setButtonBusy('importAuthenticatorButton', true, 'Importiere ...');
+  try {
+    const form = new FormData();
+    form.append('maFile', file, file.name);
+    const result = await api('/api/authenticators/import', { method: 'POST', body: form });
+    input.value = '';
+    await loadAuthenticators();
+    toast(result.updated ? 'MAFile aktualisiert.' : 'MAFile sicher importiert.');
+  } catch (error) { toast(error.message, true); }
+  finally { setButtonBusy('importAuthenticatorButton', false, 'MAFile importieren'); }
+}
+
+async function deleteAuthenticator(id) {
+  const authenticator = state.authenticators.find(item => item.id === id);
+  if (!authenticator || !window.confirm(`Authenticator für „${authenticator.accountName}“ wirklich entfernen? Der verschlüsselte Shared Secret wird gelöscht.`)) return;
+  try {
+    await api(`/api/authenticators/${id}`, { method: 'DELETE' });
+    clearTimeout(state.authenticatorTimers[id]);
+    await loadAuthenticators();
+    toast('Authenticator entfernt.');
+  } catch (error) { toast(error.message, true); }
+}
+
 async function loadMail() {
   const requestId = ++state.mail.requestId;
   try {
@@ -453,7 +521,7 @@ async function checkSession() { try { const me = await api('/api/web/me'); showA
 
 $('loginForm').addEventListener('submit', async event => { event.preventDefault(); setButtonBusy('dashboardLoginButton', true, 'Anmeldung läuft ...'); $('loginError').textContent = ''; try { const me = await api('/api/web/login', { method: 'POST', body: JSON.stringify({ username: $('loginUsername').value, password: $('loginPassword').value }) }); $('loginPassword').value = ''; showApp(me.username); await loadSettings(); await loadControl(); } catch (error) { $('loginError').textContent = error.message; setButtonBusy('dashboardLoginButton', false, 'Dashboard öffnen'); } });
 document.querySelectorAll('.nav-item').forEach(item => item.addEventListener('click', () => setView(item.dataset.view)));
-$('refreshButton').addEventListener('click', () => state.view === 'play' || state.view === 'notplay' ? loadAccounts() : state.view === 'control' ? loadControl() : state.view === 'mail' ? loadMail() : loadSettings());
+$('refreshButton').addEventListener('click', () => state.view === 'play' || state.view === 'notplay' ? loadAccounts() : state.view === 'control' ? loadControl() : state.view === 'mail' ? loadMail() : state.view === 'authenticator' ? loadAuthenticators() : loadSettings());
 $('primeFilter').addEventListener('change', loadAccounts); $('accountSearch').addEventListener('input', renderAccounts);
 $('focusButton').addEventListener('click', () => { state.focusMode = !state.focusMode; renderControl(); });
 $('refreshAllButton').addEventListener('click', loadControl);
@@ -462,6 +530,14 @@ $('mailSearch').addEventListener('input', () => { clearTimeout(state.mail.search
 $('mailUnread').addEventListener('change', loadMail); $('syncMailButton').addEventListener('click', syncMail);
 $('mailList').addEventListener('click', event => { const row = event.target.closest('[data-mail-id]'); if (row) selectMail(row.dataset.mailId); });
 document.querySelectorAll('[data-mail-group]').forEach(button => button.addEventListener('click', () => { if (state.mail.activeGroup === button.dataset.mailGroup) return; state.mail.activeGroup = button.dataset.mailGroup; state.mail.selected = null; loadMail(); }));
+$('importAuthenticatorButton').addEventListener('click', importAuthenticator);
+$('authenticatorList').addEventListener('click', event => {
+  const row = event.target.closest('[data-authenticator-id]');
+  if (!row) return;
+  const id = row.dataset.authenticatorId;
+  if (event.target.closest('[data-authenticator-code]')) fetchAuthenticatorCode(id, event.target.closest('[data-authenticator-code]'));
+  if (event.target.closest('[data-authenticator-delete]')) deleteAuthenticator(id);
+});
 $('logoutButton').addEventListener('click', async () => { await api('/api/web/logout', { method: 'POST' }); showLogin(); });
 $('addAccountButton').addEventListener('click', () => openAuthDialog());
 $('closeDialog').addEventListener('click', () => $('addAccountDialog').close()); $('addAccountForm').addEventListener('submit', event => { event.preventDefault(); startAuth(); }); $('guardSubmit').addEventListener('click', submitGuard);
