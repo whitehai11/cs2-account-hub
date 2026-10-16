@@ -18,6 +18,7 @@ test('calculates overview counters from the complete account fleet', () => {
   expect(app).toContain("api('/api/accounts')");
   expect(app).toContain("sectionName(account.section) === 'NotPlayReady'");
   expect(app).toContain("state.view === 'vac'");
+  expect(app).toContain('state.accounts.some(account => account.id === state.selected.id)');
 });
 
 test('exposes and clearly renders the dedicated VAC section', () => {

@@ -206,7 +206,8 @@ async function loadAccounts() {
     state.allAccounts = state.accounts;
     renderAccounts();
     await loadOverview();
-    if (state.selected) await selectAccount(state.selected.id, false);
+    if (state.selected && state.accounts.some(account => account.id === state.selected.id)) await selectAccount(state.selected.id, false);
+    else if (state.selected) { state.selected = null; renderDetails(); }
   } catch (error) { toast(error.message, true); }
 }
 
