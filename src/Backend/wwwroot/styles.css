@@ -170,6 +170,10 @@ dialog { width: min(510px, calc(100% - 28px)); padding: 0; border: 1px solid var
 .match-outcome.match-loss { background: #b33e55; } .match-outcome.match-draw { background: #9a7832; }
 .match-mode, .match-stat { color: #a3b8d1; font-size: 10px; } .match-stat { text-align: center; }
 @media (max-width: 780px) { .match-table-head { display: none; } .match-row { grid-template-columns: 1fr auto auto; gap: 8px; } .match-mode, .match-stat { display: none; } .match-date { grid-column: 1 / -1; } }
+.timeline-toolbar { display: flex; justify-content: space-between; align-items: flex-end; gap: 18px; margin-bottom: 18px; }
+.timeline-toolbar h3 { margin: 4px 0; font-size: 22px; }
+.timeline-view { max-width: 1120px; animation: panel-in .35s ease; }
+.timeline-view .timeline-panel { margin-top: 0; padding: 20px; border: 1px solid var(--line); border-radius: 13px; background: rgba(13,23,40,.72); }
 .timeline-panel { margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--line); }
 .timeline-panel h4 { margin: 0 0 4px; font-size: 18px; }
 .timeline-summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; margin: 18px 0; }
@@ -191,6 +195,7 @@ dialog { width: min(510px, calc(100% - 28px)); padding: 0; border: 1px solid var
 .nav-icon-control { border: 1.5px solid currentColor; border-radius: 4px; background: linear-gradient(currentColor,currentColor) 3px 3px/4px 4px no-repeat, linear-gradient(currentColor,currentColor) 10px 3px/4px 4px no-repeat, linear-gradient(currentColor,currentColor) 3px 10px/4px 4px no-repeat, linear-gradient(currentColor,currentColor) 10px 10px/4px 4px no-repeat; }
 .nav-icon-mail { border: 1.5px solid currentColor; border-radius: 4px; }
 .nav-icon-mail::after { content: ""; position: absolute; inset: 3px 2px auto; height: 7px; border-bottom: 1.5px solid currentColor; transform: skewY(-28deg); }
+.nav-icon-timeline { border: 1.5px solid currentColor; border-radius: 50%; background: linear-gradient(145deg, transparent 44%, currentColor 45% 53%, transparent 54%) 3px 8px/10px 6px no-repeat; }
 .control-view { display: grid; gap: 16px; }
 .control-hero { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; padding: 24px 26px; border: 1px solid #2b4e76; border-radius: 16px; background: linear-gradient(110deg, rgba(28,68,111,.56), rgba(16,27,45,.86) 68%); box-shadow: 0 20px 50px rgba(0,0,0,.14); }
 .control-hero h3 { margin: 5px 0 5px; font-size: 24px; letter-spacing: -.03em; }

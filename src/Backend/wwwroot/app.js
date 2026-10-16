@@ -165,20 +165,22 @@ function setView(view) {
   const settings = view === 'loadout' || view === 'personalize';
   const mail = view === 'mail';
   const authenticator = view === 'authenticator';
+  const timeline = view === 'timeline';
   const control = view === 'control';
-  $('accountsView').classList.toggle('hidden', settings || control || mail || authenticator);
+  $('accountsView').classList.toggle('hidden', settings || control || mail || authenticator || timeline);
   $('settingsView').classList.toggle('hidden', !settings);
   $('controlView').classList.toggle('hidden', !control);
   $('mailView').classList.toggle('hidden', !mail);
   $('authenticatorView').classList.toggle('hidden', !authenticator);
-  $('overview').classList.toggle('hidden', settings || mail || authenticator);
-  $('signalBar').classList.toggle('hidden', settings || mail || authenticator);
+  $('timelineView').classList.toggle('hidden', !timeline);
+  $('overview').classList.toggle('hidden', settings || mail || authenticator || timeline);
+  $('signalBar').classList.toggle('hidden', settings || mail || authenticator || timeline);
   $('loadoutSettings').classList.toggle('hidden', view !== 'loadout');
   $('personalizeSettings').classList.toggle('hidden', view !== 'personalize');
-  const titles = { control: ['Mission Control', 'Alle Accounts. Alle Signale. Ein klarer nächster Schritt.'], play: ['Play Ready', 'Accounts ohne aktiven Cooldown oder VAC'], notplay: ['Not Play Ready', 'Accounts mit Cooldown oder unbekanntem Status'], vac: ['VAC-Ban', 'Accounts mit erkanntem VAC-Ban'], mail: ['Steam Mail', 'Globaler Steam-Posteingang ohne Account-Zuordnung'], authenticator: ['Steam Authenticator', 'MAFile-gestützte Steam-Guard-Codes mit Account-Abgleich'], loadout: ['Loadout', 'Serverseitige Presets und Synchronisierung'], personalize: ['Personalize', 'Profil-Presets und Account-Timeline'] };
+  const titles = { control: ['Mission Control', 'Alle Accounts. Alle Signale. Ein klarer nächster Schritt.'], play: ['Play Ready', 'Accounts ohne aktiven Cooldown oder VAC'], notplay: ['Not Play Ready', 'Accounts mit Cooldown oder unbekanntem Status'], vac: ['VAC-Ban', 'Accounts mit erkanntem VAC-Ban'], mail: ['Steam Mail', 'Globaler Steam-Posteingang ohne Account-Zuordnung'], authenticator: ['Steam Authenticator', 'MAFile-gestützte Steam-Guard-Codes mit Account-Abgleich'], timeline: ['Timeline', 'Die Historie deiner Account-Flotte'], loadout: ['Loadout', 'Serverseitige Presets und Synchronisierung'], personalize: ['Personalize', 'Profil-Presets und Account-Profil'] };
   $('pageTitle').textContent = titles[view][0]; $('pageSubtitle').textContent = titles[view][1];
-  const animatedView = control ? $('controlView') : mail ? $('mailView') : authenticator ? $('authenticatorView') : settings ? $('settingsView') : $('accountsView'); animatedView.classList.remove('view-enter'); requestAnimationFrame(() => animatedView.classList.add('view-enter'));
-  if (control) loadControl(); else if (mail) loadMail(); else if (authenticator) loadAuthenticators(); else if (settings) loadSettings(); else loadAccounts();
+  const animatedView = control ? $('controlView') : mail ? $('mailView') : authenticator ? $('authenticatorView') : timeline ? $('timelineView') : settings ? $('settingsView') : $('accountsView'); animatedView.classList.remove('view-enter'); requestAnimationFrame(() => animatedView.classList.add('view-enter'));
+  if (control) loadControl(); else if (mail) loadMail(); else if (authenticator) loadAuthenticators(); else if (timeline) loadTimeline(); else if (settings) loadSettings(); else loadAccounts();
 }
 
 async function loadControl() {
@@ -356,7 +358,6 @@ async function loadSettings() {
     const personalize = await api('/api/settings/personalize');
     $('personaName').value = personalize.personaName || ''; $('realName').value = personalize.realName || ''; $('summary').value = personalize.summary || '';
     $('clearAliasHistory').checked = !!personalize.clearAliasHistory; state.avatarBase64 = personalize.avatarBase64 || null;
-    if (state.view === 'personalize') await loadTimeline();
   } catch (error) { toast(error.message, true); }
 }
 
@@ -580,11 +581,11 @@ async function checkSession() { try { const me = await api('/api/web/me'); showA
 
 $('loginForm').addEventListener('submit', async event => { event.preventDefault(); setButtonBusy('dashboardLoginButton', true, 'Anmeldung läuft ...'); $('loginError').textContent = ''; try { const me = await api('/api/web/login', { method: 'POST', body: JSON.stringify({ username: $('loginUsername').value, password: $('loginPassword').value }) }); $('loginPassword').value = ''; showApp(me.username); await loadSettings(); await loadControl(); } catch (error) { $('loginError').textContent = error.message; setButtonBusy('dashboardLoginButton', false, 'Dashboard öffnen'); } });
 document.querySelectorAll('.nav-item').forEach(item => item.addEventListener('click', () => setView(item.dataset.view)));
-$('refreshButton').addEventListener('click', () => state.view === 'play' || state.view === 'notplay' || state.view === 'vac' ? loadAccounts() : state.view === 'control' ? loadControl() : state.view === 'mail' ? loadMail() : state.view === 'authenticator' ? loadAuthenticators() : loadSettings());
+$('refreshButton').addEventListener('click', () => state.view === 'play' || state.view === 'notplay' || state.view === 'vac' ? loadAccounts() : state.view === 'control' ? loadControl() : state.view === 'mail' ? loadMail() : state.view === 'authenticator' ? loadAuthenticators() : state.view === 'timeline' ? loadTimeline() : loadSettings());
 $('primeFilter').addEventListener('change', loadAccounts); $('accountSearch').addEventListener('input', renderAccounts);
 $('focusButton').addEventListener('click', () => { state.focusMode = !state.focusMode; renderControl(); });
 $('refreshAllButton').addEventListener('click', loadControl);
-$('openTimelineButton').addEventListener('click', () => setView('personalize'));
+$('openTimelineButton').addEventListener('click', () => setView('timeline'));
 $('mailSearch').addEventListener('input', () => { clearTimeout(state.mail.searchTimer); state.mail.searchTimer = setTimeout(loadMail, 250); });
 $('mailUnread').addEventListener('change', loadMail); $('syncMailButton').addEventListener('click', syncMail);
 $('mailList').addEventListener('click', event => { const row = event.target.closest('[data-mail-id]'); if (row) selectMail(row.dataset.mailId); });

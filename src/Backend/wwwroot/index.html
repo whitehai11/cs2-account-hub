@@ -32,6 +32,7 @@
         <div class="nav-divider" aria-hidden="true">TOOLS</div>
         <button class="nav-item" data-view="mail"><span class="nav-icon nav-icon-mail"></span><span>Steam Mail</span><span id="mailUnreadBadge" class="nav-count hidden">0</span></button>
         <button class="nav-item" data-view="authenticator"><span class="nav-icon nav-icon-authenticator"></span><span>Steam Authenticator</span></button>
+        <button class="nav-item" data-view="timeline"><span class="nav-icon nav-icon-timeline"></span><span>Timeline</span></button>
         <button class="nav-item" data-view="loadout"><span class="nav-icon nav-icon-loadout"></span><span>Loadout</span></button>
         <button class="nav-item" data-view="personalize"><span class="nav-icon nav-icon-profile"></span><span>Personalize</span></button>
       </nav>
@@ -69,6 +70,11 @@
         <section class="panel authenticator-panel"><div class="panel-head"><div><h3>Verknüpfte Authenticatoren</h3><p class="muted">Der Account-Abgleich erfolgt über den Steam-Anmeldenamen aus der MAFile.</p></div><span id="authenticatorCount" class="panel-count">0</span></div><div id="authenticatorList" class="authenticator-list"></div></section>
       </section>
 
+      <section id="timelineView" class="timeline-view hidden">
+        <div class="timeline-toolbar"><div><span class="eyebrow">EVENT HISTORY</span><h3>Account-Timeline</h3><p class="muted">Alle wichtigen CM-/GC-Ereignisse deiner Accounts an einem Ort.</p></div><button id="refreshTimelineButton" class="secondary" type="button">Timeline aktualisieren</button></div>
+        <section class="panel timeline-panel"><div id="timelineSummary" class="timeline-summary"></div><div id="timelineList" class="timeline-list"></div></section>
+      </section>
+
       <section id="settingsView" class="settings-panel panel hidden">
         <div id="loadoutSettings" class="hidden">
           <div class="settings-heading"><div><h3>Loadout Preset</h3><p class="muted">Wähle deine Waffen pro Slot. Die Auswahl wird auf dem Server gespeichert.</p></div><span class="saved-badge">Serverseitig</span></div>
@@ -83,7 +89,6 @@
           <label class="check"><input id="clearAliasHistory" type="checkbox"> Alias-Historie löschen</label>
           <label>Avatar (optional)<input id="avatarFile" type="file" accept="image/*"></label>
           <button id="savePersonalize" class="primary">Personalize speichern</button>
-          <section class="timeline-panel"><div class="settings-heading"><div><h4>Account-Timeline</h4><p class="muted">Alle wichtigen CM-/GC-Ereignisse deiner Accounts an einem Ort.</p></div><button id="refreshTimelineButton" class="secondary" type="button">Timeline aktualisieren</button></div><div id="timelineSummary" class="timeline-summary"></div><div id="timelineList" class="timeline-list"></div></section>
         </div>
       </section>
     </main>
