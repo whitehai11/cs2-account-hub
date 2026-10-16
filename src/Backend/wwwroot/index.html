@@ -24,8 +24,12 @@
     <aside class="sidebar">
       <div class="brand"><span class="brand-mark small">CS2</span><div><strong>Account Hub</strong><small>CM / GC CONTROL</small></div></div>
       <nav>
-        <button class="nav-item active" data-view="play"><span class="nav-icon nav-icon-ready"></span><span>Play Ready</span></button>
+        <button class="nav-item active" data-view="control"><span class="nav-icon nav-icon-control"></span><span>Mission Control</span></button>
+        <div class="nav-divider" aria-hidden="true">ACCOUNTS</div>
+        <button class="nav-item" data-view="play"><span class="nav-icon nav-icon-ready"></span><span>Play Ready</span></button>
         <button class="nav-item" data-view="notplay"><span class="nav-icon nav-icon-alert"></span><span>Not Play Ready</span></button>
+        <div class="nav-divider" aria-hidden="true">TOOLS</div>
+        <button class="nav-item" data-view="mail"><span class="nav-icon nav-icon-mail"></span><span>Steam Mail</span><span id="mailUnreadBadge" class="nav-count hidden">0</span></button>
         <button class="nav-item" data-view="loadout"><span class="nav-icon nav-icon-loadout"></span><span>Loadout</span></button>
         <button class="nav-item" data-view="personalize"><span class="nav-icon nav-icon-profile"></span><span>Personalize</span></button>
       </nav>
@@ -34,14 +38,19 @@
 
     <main class="main">
       <header class="topbar">
-        <div><h2 id="pageTitle">Play Ready</h2><p id="pageSubtitle" class="muted">Accounts ohne aktiven Cooldown oder VAC</p></div>
+        <div><span id="pageKicker" class="eyebrow">OPERATIONS / LIVE</span><h2 id="pageTitle">Mission Control</h2><p id="pageSubtitle" class="muted">Alle Accounts. Alle Signale. Ein klarer nächster Schritt.</p></div>
         <div class="top-actions"><span id="userLabel" class="user-chip"></span><button id="refreshButton"><span class="refresh-icon">↻</span> Aktualisieren</button></div>
       </header>
       <div id="toast" class="toast hidden"></div>
       <div id="overview" class="overview"><div class="metric metric-ready"><span class="metric-icon">✓</span><span class="metric-copy"><small>Play Ready</small><strong id="readyCount">—</strong><em>bereit zum Spielen</em></span></div><div class="metric metric-warning"><span class="metric-icon">!</span><span class="metric-copy"><small>Not Play Ready</small><strong id="notReadyCount">—</strong><em>brauchen Aufmerksamkeit</em></span></div><div class="metric metric-prime"><span class="metric-icon">P</span><span class="metric-copy"><small>Prime</small><strong id="primeCount">—</strong><em>bestätigte Accounts</em></span></div><div class="metric metric-neutral"><span class="metric-icon">N</span><span class="metric-copy"><small>Non-Prime</small><strong id="nonPrimeCount">—</strong><em>ohne Prime-Status</em></span></div></div>
       <section id="signalBar" class="signal-bar"><div class="signal-title"><span class="live-dot"></span><div><strong>CM / GC Monitor</strong><small>Serverseitige Live-Übersicht</small></div></div><div class="signal-stat"><small>GC gesund</small><strong id="healthCount">—</strong></div><div class="signal-stat"><small>In CS2-Match</small><strong id="inMatchCount">—</strong></div><div class="signal-stat"><small>Loadout-Diffs</small><strong id="driftCount">—</strong></div><div class="signal-next"><small>Nächster Check</small><strong id="nextCheckHint">—</strong></div></section>
 
-      <section id="accountsView" class="content-grid">
+      <section id="controlView" class="control-view">
+        <div class="control-hero"><div><span class="eyebrow">ACCOUNT FLEET</span><h3>Was braucht gerade Aufmerksamkeit?</h3><p class="muted">Mission Control bündelt den Zustand deiner Accounts und die letzten Signale.</p></div><div class="control-actions"><button id="focusButton" class="secondary">Nur Aufmerksamkeit</button><button id="refreshAllButton" class="primary">Fleet prüfen</button></div></div>
+        <div class="control-grid"><section class="panel attention-panel"><div class="panel-head"><div><h3>Attention Queue</h3><p class="muted">Sortiert nach Dringlichkeit</p></div><span id="attentionCount" class="panel-count">—</span></div><div id="attentionList" class="attention-list"></div></section><section class="panel signals-panel"><div class="panel-head"><div><h3>Live Signals</h3><p class="muted">Die letzten Änderungen im Hub</p></div><button id="openTimelineButton" class="text-button">Alle öffnen</button></div><div id="controlSignals" class="control-signals"></div></section></div>
+      </section>
+
+      <section id="accountsView" class="content-grid hidden">
         <div class="accounts-panel panel">
           <div class="panel-head"><div><h3>Accounts</h3><p id="accountCount" class="muted"></p></div><button id="addAccountButton" class="primary">Account hinzufügen</button></div>
           <div class="filters"><select id="primeFilter"><option value="">Prime und Non-Prime</option><option value="Prime">Prime</option><option value="NonPrime">Non-Prime</option><option value="Unknown">Unbekannt</option></select><input id="accountSearch" placeholder="Account suchen..."></div>
@@ -49,6 +58,8 @@
         </div>
         <div class="details-panel panel"><div id="emptyDetails" class="empty">Wähle einen Account aus.</div><div id="accountDetails" class="hidden"></div></div>
       </section>
+
+      <section id="mailView" class="mail-view hidden"><div class="mail-toolbar"><div><span class="eyebrow">GLOBAL SIGNALS</span><h3>Steam Mail</h3><p class="muted">Alle erlaubten Steam-Nachrichten in einer sicheren, globalen Inbox — ohne Account-Zuordnung.</p></div><div class="mail-actions"><label class="mail-search"><span class="sr-only">Mail suchen</span><input id="mailSearch" type="search" placeholder="Betreff oder Absender suchen..." /></label><label class="mail-unread"><input id="mailUnread" type="checkbox"> Nur ungelesen</label><button id="syncMailButton" class="secondary"><span class="button-text">Synchronisieren</span></button></div></div><div id="mailNotice" class="mail-notice hidden"></div><div class="mail-layout"><section class="panel mail-list-panel"><div class="mail-list-heading"><strong id="mailCount">0 Nachrichten</strong><span id="mailLastSync" class="muted">Noch nicht synchronisiert</span></div><div id="mailList" class="mail-list"></div></section><section class="panel mail-detail-panel"><div id="mailEmpty" class="mail-empty"><span class="mail-empty-icon">✉</span><strong>Wähle eine Nachricht aus</strong><span class="muted">Steam-Mails bleiben im Hub lesbar, ohne externe HTML-Inhalte auszuführen.</span></div><article id="mailDetail" class="mail-detail hidden"></article></section></div></section>
 
       <section id="settingsView" class="settings-panel panel hidden">
         <div id="loadoutSettings" class="hidden">

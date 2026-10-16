@@ -155,6 +155,23 @@ public sealed record AccountTimelineEventDto(
     string Severity,
     DateTimeOffset OccurredUtc);
 
+public sealed record SteamMailMessageDto(
+    Guid Id,
+    string Subject,
+    string Sender,
+    DateTimeOffset ReceivedUtc,
+    bool IsRead,
+    string Preview,
+    bool HasBody);
+
+public sealed record SteamMailDetailDto(
+    Guid Id,
+    string Subject,
+    string Sender,
+    DateTimeOffset ReceivedUtc,
+    bool IsRead,
+    string Body);
+
 public sealed record LoadoutPresetDto(
     string Name,
     IReadOnlyDictionary<uint, uint> T,

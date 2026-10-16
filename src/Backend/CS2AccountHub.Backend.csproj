@@ -9,6 +9,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Shared\CS2AccountHub.Contracts.csproj" />
     <PackageReference Include="Microsoft.AspNetCore.DataProtection.Extensions" Version="8.0.0" />
+    <PackageReference Include="MailKit" Version="4.12.1" />
   </ItemGroup>
 
   <ItemGroup>

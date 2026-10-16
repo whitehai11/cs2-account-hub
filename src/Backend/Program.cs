@@ -13,6 +13,8 @@ Directory.CreateDirectory(dataDirectory);
 
 builder.Services.AddSingleton<AccountStore>();
 builder.Services.AddSingleton<AccountEventStore>();
+builder.Services.AddSingleton<SteamMailStore>();
+builder.Services.AddSingleton<SteamMailService>();
 builder.Services.AddSingleton<SettingsStore>();
 builder.Services.AddSingleton<OperationStore>();
 builder.Services.AddSingleton<AuthSessionStore>();
@@ -29,6 +31,7 @@ builder.Services.AddHostedService<AccountCheckScheduler>();
 builder.Services.AddHttpClient<DiscordWebhookNotifier>();
 builder.Services.AddHostedService<CooldownNotificationWorker>();
 builder.Services.AddHostedService<ProfileEnrichmentWorker>();
+builder.Services.AddHostedService<SteamMailSyncWorker>();
 builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 3 * 1024 * 1024);
 builder.Services.AddRateLimiter(options =>
 {
@@ -221,6 +224,36 @@ app.MapGet("/api/timeline", (int? limit, Guid? accountId, string? type, AccountE
     return Results.Ok(items);
 });
 
+app.MapGet("/api/mail", (string? query, bool? unread, int? limit, SteamMailStore mail) =>
+{
+    var snapshot = mail.Snapshot(query, unread, limit ?? 50);
+    return Results.Ok(new
+    {
+        configured = snapshot.Configured,
+        lastSyncUtc = snapshot.LastSyncUtc,
+        lastSyncError = snapshot.LastSyncError,
+        messages = snapshot.Messages,
+    });
+});
+
+app.MapGet("/api/mail/{id:guid}", (Guid id, SteamMailStore mail) =>
+{
+    var message = mail.Get(id);
+    return message is null ? Results.NotFound() : Results.Ok(message);
+});
+
+app.MapPost("/api/mail/sync", async (SteamMailService service, CancellationToken cancellationToken) =>
+{
+    if (!service.IsConfigured) return Results.Conflict(new { message = "Steam Mail ist noch nicht konfiguriert." });
+    await service.SyncAsync(cancellationToken);
+    return Results.Ok(new { synced = true });
+});
+
+app.MapPatch("/api/mail/{id:guid}/read", (Guid id, MarkMailReadRequest request, SteamMailStore mail) =>
+{
+    return mail.MarkRead(id, request.IsRead) ? Results.NoContent() : Results.NotFound();
+});
+
 app.MapGet("/api/settings/loadout", (SettingsStore settings) => Results.Ok(settings.GetLoadout()));
 app.MapPut("/api/settings/loadout", (LoadoutPresetDto request, SettingsStore settings) =>
 {
@@ -338,6 +371,7 @@ app.MapFallbackToFile("index.html");
 app.Run();
 
 public sealed record WebLoginRequest(string Username, string Password);
+public sealed record MarkMailReadRequest(bool IsRead);
 
 internal static class RequestValidation
 {
