@@ -64,6 +64,15 @@ internal sealed class AccountEventStore
         }
     }
 
+    public void RemoveForAccount(Guid accountId)
+    {
+        lock (_gate)
+        {
+            _events.RemoveAll(item => item.AccountId == accountId);
+            SaveUnsafe();
+        }
+    }
+
     private void SaveUnsafe()
     {
         var temporaryPath = _path + ".tmp";

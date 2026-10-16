@@ -23,7 +23,52 @@ function sectionName(value) { return enumName(value, ['PlayReady', 'NotPlayReady
 function healthLabel(value) { return value === 'healthy' ? 'GC gesund' : value === 'gc-unknown' ? 'GC unvollständig' : value?.startsWith('error:') ? 'GC-Fehler' : 'Noch nicht geprüft'; }
 function presenceLabel(account) { return account.inMatch === true ? 'In CS2-Match' : account.inMatch === false ? 'Nicht im Match' : 'Unbekannt'; }
 function formatDate(value) { return value ? new Date(value).toLocaleString('de-DE') : '—'; }
-function relativeTime(value) { if (!value) return '—'; const seconds = Math.round((new Date(value).getTime() - Date.now()) / 1000); if (Math.abs(seconds) < 60) return seconds >= 0 ? 'gleich' : 'gerade eben'; const minutes = Math.round(Math.abs(seconds) / 60); return seconds >= 0 ? `in ${minutes} Min.` : `vor ${minutes} Min.`; }
+function relativeTime(value, now = Date.now()) {
+  if (!value) return '—';
+  const timestamp = new Date(value).getTime();
+  if (!Number.isFinite(timestamp)) return '—';
+
+  const deltaSeconds = (timestamp - now) / 1000;
+  const future = deltaSeconds >= 0;
+  const seconds = Math.abs(deltaSeconds);
+  if (seconds < 1) return future ? 'gleich' : 'gerade eben';
+
+  let amount;
+  let singular;
+  let plural;
+  if (seconds < 60) {
+    amount = Math.floor(seconds);
+    singular = 'Sek.';
+    plural = 'Sek.';
+  } else if (seconds < 3600) {
+    amount = Math.floor(seconds / 60);
+    singular = 'Min.';
+    plural = 'Min.';
+  } else if (seconds < 86400) {
+    amount = Math.floor(seconds / 3600);
+    singular = 'Std.';
+    plural = 'Std.';
+  } else if (seconds < 7 * 86400) {
+    amount = Math.floor(seconds / 86400);
+    singular = 'Tag';
+    plural = 'Tagen';
+  } else if (seconds < 30 * 86400) {
+    amount = Math.floor(seconds / (7 * 86400));
+    singular = 'Woche';
+    plural = 'Wochen';
+  } else if (seconds < 365 * 86400) {
+    amount = Math.floor(seconds / (30 * 86400));
+    singular = 'Monat';
+    plural = 'Monaten';
+  } else {
+    amount = Math.floor(seconds / (365 * 86400));
+    singular = 'Jahr';
+    plural = 'Jahren';
+  }
+
+  const unit = amount === 1 ? singular : plural;
+  return future ? `in ${amount} ${unit}` : `vor ${amount} ${unit}`;
+}
 function cooldownPhase(account) { if (account.cooldownSeconds == null && !account.cooldownEndsUtc) return 'Unbekannt'; if (remainingSeconds(account) > 0) return 'Aktiv'; return account.cooldownEndsUtc ? 'GC-Recheck fällig' : 'Bestätigt frei'; }
 function nextCooldownText(account) { const seconds = account.nextCooldownSeconds; if (!seconds) return ''; if (seconds === 20 * 60 * 60) return '20 Stunden'; if (seconds === 7 * 86400) return '7 Tage'; if (seconds === 31 * 86400) return '31 Tage'; if (seconds === 90 * 86400) return '90 Tage'; return '181 Tage'; }
 function matchResult(match) { return match.teamScore != null && match.opponentScore != null ? `${match.teamScore} : ${match.opponentScore}` : '—'; }
@@ -172,14 +217,30 @@ function renderDetails() {
       ${renderRatingTrend(account)}
       <div class="detail-lines"><div class="detail-line"><span>VAC</span><strong>${account.vacBanned === true ? 'Ja' : account.vacBanned === false ? 'Nein' : 'Unbekannt'}</strong></div><div class="detail-line"><span>Cooldown-Ende</span><strong>${formatDate(account.cooldownEndsUtc)}</strong></div>${account.nextCooldownSeconds ? `<div class="detail-line"><span>Nächster Cooldown</span><strong class="next-cooldown-value">${nextCooldownText(account)}</strong></div>` : ''}<div class="detail-line"><span>Nächster GC-Check</span><strong>${formatDate(account.nextCheckUtc)} <span class="muted">(${relativeTime(account.nextCheckUtc)})</span></strong></div><div class="detail-line"><span>Letzter Login</span><strong>${formatDate(account.lastLoginUtc)}</strong></div></div>
       <div class="note-row"><input id="noteInput" value="${esc(account.note || '')}" placeholder="Notiz..."><button id="saveNote">Speichern</button></div>
-      <div class="detail-actions"><button data-command="RefreshStatus">Status aktualisieren</button><button data-command="SyncLoadout">Loadout prüfen</button><button data-command="ClearWorkshop">Workshop leeren</button><button data-command="ApplyLoadout">Loadout anwenden</button><button data-command="Personalize">Personalize</button><button id="permaGreenButton" class="perma-action">${account.isPermaGreen ? 'Perma-Green entfernen' : 'Als Perma-Green markieren'}</button><button id="monitoringButton" class="monitoring-action">${account.monitoringPaused ? 'Checks fortsetzen' : 'Spielmodus aktivieren'}</button></div>
+      <div class="detail-actions"><button data-command="RefreshStatus">Status aktualisieren</button><button data-command="SyncLoadout">Loadout prüfen</button><button data-command="ClearWorkshop">Workshop leeren</button><button data-command="ApplyLoadout">Loadout anwenden</button><button data-command="Personalize">Personalize</button><button id="permaGreenButton" class="perma-action">${account.isPermaGreen ? 'Perma-Green entfernen' : 'Als Perma-Green markieren'}</button><button id="monitoringButton" class="monitoring-action">${account.monitoringPaused ? 'Checks fortsetzen' : 'Spielmodus aktivieren'}</button><button id="deleteAccountButton" class="danger-action">Account aus System löschen</button></div>
       ${renderRecentMatches(account)}
       <p id="operationMessage" class="muted"></p>
     </div>`;
   $('saveNote').addEventListener('click', saveNote);
   $('permaGreenButton').addEventListener('click', togglePermaGreen);
   $('monitoringButton').addEventListener('click', toggleMonitoring);
+  $('deleteAccountButton').addEventListener('click', deleteSelectedAccount);
   document.querySelectorAll('[data-command]').forEach(button => button.addEventListener('click', () => runCommand(button.dataset.command)));
+}
+
+async function deleteSelectedAccount() {
+  const account = state.selected;
+  if (!account) return;
+  const label = account.personaName || account.steamId;
+  if (!window.confirm(`Account „${label}“ wirklich aus dem System löschen? Status, Token und Timeline-Einträge werden entfernt.`)) return;
+  try {
+    await api(`/api/accounts/${account.id}`, { method: 'DELETE' });
+    state.selected = null;
+    toast('Steam-Account aus dem System gelöscht.');
+    await loadAccounts();
+  } catch (error) {
+    toast(error.message, true);
+  }
 }
 
 async function toggleMonitoring() {

@@ -160,6 +160,13 @@ app.MapGet("/api/accounts/{id:guid}", (Guid id, AccountStore store) =>
     return account is null ? Results.NotFound() : Results.Ok(AccountMappings.ToDetail(account));
 });
 
+app.MapDelete("/api/accounts/{id:guid}", (Guid id, AccountStore store, AccountEventStore events) =>
+{
+    if (!store.Delete(id)) return Results.NotFound();
+    events.RemoveForAccount(id);
+    return Results.NoContent();
+});
+
 app.MapPatch("/api/accounts/{id:guid}/note", (Guid id, UpdateNoteRequest request, AccountStore store) =>
 {
     if (!RequestValidation.IsValidNote(request)) return Results.BadRequest(new { message = "The note is too long." });
@@ -585,6 +592,16 @@ internal sealed class AccountStore
         lock (_gate)
         {
             return _accounts.GetValueOrDefault(id);
+        }
+    }
+
+    public bool Delete(Guid id)
+    {
+        lock (_gate)
+        {
+            if (!_accounts.Remove(id)) return false;
+            SaveUnsafe();
+            return true;
         }
     }
 

@@ -606,6 +606,8 @@ button:disabled { transform: none !important; }
 .primary:hover { color: #1d1206; background: linear-gradient(180deg, #ffd36c, #e58a21); }
 .secondary { color: #e3bd7e; background: #1a130c; }
 .ghost { color: #b49a75; }
+.danger-action { color: #f08a78; border-color: #713526; background: #2a1713; }
+.danger-action:hover { color: #ffd0c4; border-color: #c45a42; background: #3a1e18; }
 .muted { color: #9c8b75; }
 
 .overview { border-color: #332619; background: transparent; }
