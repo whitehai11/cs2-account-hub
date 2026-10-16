@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Text.RegularExpressions;
 using MailKit;
@@ -62,14 +63,27 @@ internal sealed class SteamMailService
 
         var deadline = DateTimeOffset.UtcNow.Add(timeout);
         var sinceUtc = requestedAfterUtc.AddSeconds(-15);
+        var attempt = 0;
         while (DateTimeOffset.UtcNow < deadline)
         {
+            attempt++;
+            var syncStopwatch = Stopwatch.StartNew();
             await SyncAsync(cancellationToken);
             var messages = _store.RecentSteamGuardMessages(sinceUtc, GetGuardRecipientDomains());
+            _logger.LogInformation(
+                "Steam Guard mail poll {Attempt} completed in {ElapsedMs} ms with {CandidateCount} candidates.",
+                attempt,
+                syncStopwatch.ElapsedMilliseconds,
+                messages.Count);
+
             foreach (var message in messages)
             {
                 var code = ExtractSteamGuardCode(message.Subject, message.Body);
-                if (code is not null) return code;
+                if (code is not null)
+                {
+                    _logger.LogInformation("Steam Guard mail poll found a code on attempt {Attempt}.", attempt);
+                    return code;
+                }
             }
 
             var remaining = deadline - DateTimeOffset.UtcNow;
@@ -77,6 +91,7 @@ internal sealed class SteamMailService
             await Task.Delay(TimeSpan.FromSeconds(Math.Min(5, Math.Max(1, remaining.TotalSeconds))), cancellationToken);
         }
 
+        _logger.LogWarning("Steam Guard mail polling timed out after {AttemptCount} attempts.", attempt);
         return null;
     }
 

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Security.Cryptography;
@@ -941,12 +942,14 @@ internal sealed class AuthSessionStore
     private readonly TokenProtector _tokens;
     private readonly AccountEventStore _events;
     private readonly SteamMailService _mail;
+    private readonly ILogger<AuthSessionStore> _logger;
 
-    public AuthSessionStore(TokenProtector tokens, AccountEventStore events, SteamMailService mail)
+    public AuthSessionStore(TokenProtector tokens, AccountEventStore events, SteamMailService mail, ILogger<AuthSessionStore> logger)
     {
         _tokens = tokens;
         _events = events;
         _mail = mail;
+        _logger = logger;
     }
 
     public async Task<AuthSessionRecord> StartAsync(string accountName, string password, ISteamAccountGateway gateway, AccountStore accounts, CancellationToken cancellationToken)
@@ -976,6 +979,10 @@ internal sealed class AuthSessionStore
 
     private async Task RunAsync(AuthSessionRecord session, ISteamAccountGateway gateway, AccountStore accounts)
     {
+        var stopwatch = Stopwatch.StartNew();
+        var stage = "credentials";
+        _logger.LogInformation("Steam auth session {SessionId} started.", session.Id);
+
         try
         {
             var result = await gateway.AuthenticateAsync(
@@ -985,6 +992,7 @@ internal sealed class AuthSessionStore
                 progress: null,
                 session.CancellationToken.Token);
 
+            _logger.LogInformation("Steam auth session {SessionId} credentials accepted after {ElapsedMs} ms.", session.Id, stopwatch.ElapsedMilliseconds);
             session.SteamId = result.SteamId;
             var account = new AccountRecord
             {
@@ -995,8 +1003,15 @@ internal sealed class AuthSessionStore
                 LastLoginUtc = DateTimeOffset.UtcNow,
             };
 
+            stage = "status";
             var status = await gateway.QueryStatusAsync(result.RefreshToken, result.SteamId, session.CancellationToken.Token);
+            _logger.LogInformation("Steam auth session {SessionId} status loaded after {ElapsedMs} ms.", session.Id, stopwatch.ElapsedMilliseconds);
+
+            stage = "prime";
             account.ApplyStatus(status, await gateway.QueryPrimeAsync(result.RefreshToken, result.SteamId, status, session.CancellationToken.Token));
+            _logger.LogInformation("Steam auth session {SessionId} prime status loaded after {ElapsedMs} ms.", session.Id, stopwatch.ElapsedMilliseconds);
+
+            stage = "profile";
             account.ApplyProfile(await gateway.QueryProfileAsync(result.SteamId, session.CancellationToken.Token));
             account.StatusUpdatedUtc = DateTimeOffset.UtcNow;
             accounts.Upsert(account);
@@ -1010,10 +1025,29 @@ internal sealed class AuthSessionStore
             session.State = AuthState.Failed;
             session.PromptMessage = "Authentication was cancelled.";
         }
-        catch (Exception)
+        catch (Exception exception)
         {
             session.State = AuthState.Failed;
             session.PromptMessage = "Steam authentication failed. Check the account details and try again.";
+
+            if (exception is NfaLoader.Services.SteamCmException cmException)
+            {
+                _logger.LogWarning(
+                    "Steam auth session {SessionId} failed during {Stage} after {ElapsedMs} ms with Steam result {SteamResult}.",
+                    session.Id,
+                    stage,
+                    stopwatch.ElapsedMilliseconds,
+                    cmException.Result);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "Steam auth session {SessionId} failed during {Stage} after {ElapsedMs} ms with {ExceptionType}.",
+                    session.Id,
+                    stage,
+                    stopwatch.ElapsedMilliseconds,
+                    exception.GetType().Name);
+            }
         }
     }
 
@@ -1027,6 +1061,7 @@ internal sealed class AuthSessionStore
         if (prompt.Type == NfaLoader.Services.SteamGuardType.EmailCode)
         {
             session.PromptMessage = "Steam Guard-Code wird automatisch in den Catch-all-Mailboxen gesucht ...";
+            var guardStopwatch = Stopwatch.StartNew();
             using var autoCodeCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             var autoCodeTask = _mail.WaitForSteamGuardCodeAsync(session.StartedUtc, TimeSpan.FromSeconds(90), autoCodeCancellation.Token);
             var manualCodeTask = session.Code.Task.WaitAsync(cancellationToken);
@@ -1035,6 +1070,7 @@ internal sealed class AuthSessionStore
             if (completedTask == manualCodeTask)
             {
                 autoCodeCancellation.Cancel();
+                _logger.LogInformation("Steam auth session {SessionId} received a manual {GuardType} code after {ElapsedMs} ms.", session.Id, prompt.Type, guardStopwatch.ElapsedMilliseconds);
                 return await manualCodeTask;
             }
 
@@ -1042,10 +1078,12 @@ internal sealed class AuthSessionStore
             if (!string.IsNullOrWhiteSpace(autoCode))
             {
                 session.PromptMessage = "Steam Guard-Code erkannt. Anmeldung wird automatisch fortgesetzt ...";
+                _logger.LogInformation("Steam auth session {SessionId} found an automatic {GuardType} code after {ElapsedMs} ms.", session.Id, prompt.Type, guardStopwatch.ElapsedMilliseconds);
                 return autoCode;
             }
 
             session.PromptMessage = "Kein Steam Guard-Code automatisch gefunden. Bitte den Code eingeben.";
+            _logger.LogWarning("Steam auth session {SessionId} did not find an automatic {GuardType} code after {ElapsedMs} ms.", session.Id, prompt.Type, guardStopwatch.ElapsedMilliseconds);
         }
 
         return await session.Code.Task.WaitAsync(cancellationToken);
