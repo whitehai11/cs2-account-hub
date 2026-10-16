@@ -1030,7 +1030,7 @@ internal sealed class AuthSessionStore
             using var autoCodeCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             var autoCodeTask = _mail.WaitForSteamGuardCodeAsync(session.StartedUtc, TimeSpan.FromSeconds(90), autoCodeCancellation.Token);
             var manualCodeTask = session.Code.Task.WaitAsync(cancellationToken);
-            var completedTask = await Task.WhenAny(autoCodeTask, manualCodeTask);
+            var completedTask = await Task.WhenAny((Task)autoCodeTask, manualCodeTask);
 
             if (completedTask == manualCodeTask)
             {
