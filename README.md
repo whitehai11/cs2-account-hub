@@ -39,6 +39,10 @@ CS2_HUB_IMAP_USERNAME=steam@example.com
 CS2_HUB_IMAP_PASSWORD=replace-with-mail-password
 # Optional: comma-separated exact addresses/domains; defaults to Steam domains
 CS2_HUB_IMAP_SENDERS=steampowered.com,steamcommunity.com
+# Optional second sender/domain group shown as a separate Mail area
+CS2_HUB_IMAP_SENDERS_SECONDARY=example.org
+CS2_HUB_IMAP_PRIMARY_LABEL=Steam
+CS2_HUB_IMAP_SECONDARY_LABEL=Zweite Domain
 EOF
 chmod 600 .env
 docker compose up --build -d
@@ -66,7 +70,7 @@ Status checks are staggered per account by default. `CS2_HUB_CHECK_INTERVAL_MINU
 
 The dashboard keeps the observed CS2 cooldown progression and shows the projected next duration: 20 hours, 7 days, 31 days, 90 days, then 181 days repeatedly. Recent CS2 matches can be loaded on demand from the Game Coordinator in the selected account's detail view.
 
-The dashboard also includes an optional global Steam Mail inbox. It uses IMAP over TLS, never SMTP, does not map messages to accounts, stores bounded metadata and plain-text previews locally, and is disabled safely when the IMAP variables are missing. Read/unread state is local to the hub; attachments and raw HTML are not exposed. See `src/Backend/Mail/README.md` for the full configuration.
+The dashboard also includes an optional global Steam Mail inbox. It uses IMAP over TLS, never SMTP, does not map messages to accounts, stores bounded metadata and plain-text previews locally, and is disabled safely when the IMAP variables are missing. Read/unread state is local to the hub; attachments and raw HTML are not exposed. Messages can be routed into two independent UI areas: the primary Steam sender group and an optional secondary sender/domain group configured with `CS2_HUB_IMAP_SENDERS_SECONDARY`. See `src/Backend/Mail/README.md` for the full configuration.
 
 ## CI and releases
 

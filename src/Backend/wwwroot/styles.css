@@ -515,3 +515,23 @@ dialog { border-radius: 15px; background: #12243b; box-shadow: 0 30px 80px rgba(
 .mail-empty-icon { border-radius: 12px; background: rgba(71,126,192,.17); box-shadow: inset 0 1px rgba(255,255,255,.08), 0 6px 13px rgba(0,0,0,.2); }
 @media (max-width: 1120px) { body { display: block; padding: 0; } .app-shell { width: 100%; min-height: 100vh; } }
 @media (max-width: 780px) { .metric { border-right: 1px solid #223d62; } .metric:nth-child(2) { border-right: 1px solid #223d62; } }
+
+/* Mail workspace: keep scrolling and pointer events inside the message surfaces. */
+.mail-view { min-width: 0; min-height: 0; }
+.mail-toolbar, .mail-actions { position: relative; z-index: 4; }
+.mail-layout { min-width: 0; min-height: 0; height: min(680px, calc(100vh - 290px)); align-items: stretch; }
+.mail-list-panel, .mail-detail-panel { min-width: 0; min-height: 0; height: 100%; overflow: hidden; display: flex; flex-direction: column; }
+.mail-list-heading { flex: 0 0 auto; }
+.mail-list-heading > div { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.mail-groups { display: flex; gap: 6px; flex: 0 0 auto; margin: 12px 0 0; padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: rgba(7,16,29,.62); }
+.mail-group { flex: 1 1 0; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1px solid transparent; border-radius: 7px; color: var(--muted); background: transparent; font-size: 11px; text-align: left; }
+.mail-group:hover { color: var(--text); background: rgba(45,82,123,.25); }
+.mail-group.active { border-color: #3f71a6; color: #f0f6fd; background: #17304d; box-shadow: inset 0 1px rgba(255,255,255,.07); }
+.mail-group-count { min-width: 18px; padding: 2px 5px; border-radius: 999px; color: #a9cfff; background: rgba(75,156,255,.12); font-size: 10px; text-align: center; }
+.mail-list { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; align-content: initial; gap: 7px; margin: 10px 0 0; padding: 0 6px 18px 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-gutter: stable; isolation: isolate; }
+.mail-row { flex: 0 0 auto; position: relative; z-index: 1; cursor: pointer; pointer-events: auto; }
+.mail-detail-panel { position: relative; }
+.mail-detail { display: block; flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-right: 6px; scrollbar-gutter: stable; }
+.mail-list-empty { min-height: 220px; flex: 1 1 auto; }
+@media (max-width: 1120px) { .mail-layout { height: auto; } .mail-list-panel { height: 500px; } .mail-detail-panel { height: 500px; } }
+@media (max-width: 620px) { .mail-list-panel { height: 420px; } .mail-detail-panel { height: 420px; } }

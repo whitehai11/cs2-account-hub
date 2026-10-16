@@ -224,14 +224,15 @@ app.MapGet("/api/timeline", (int? limit, Guid? accountId, string? type, AccountE
     return Results.Ok(items);
 });
 
-app.MapGet("/api/mail", (string? query, bool? unread, int? limit, SteamMailStore mail) =>
+app.MapGet("/api/mail", (string? query, bool? unread, string? group, int? limit, SteamMailStore mail) =>
 {
-    var snapshot = mail.Snapshot(query, unread, limit ?? 50);
+    var snapshot = mail.Snapshot(query, unread, group, limit ?? 100);
     return Results.Ok(new
     {
         configured = snapshot.Configured,
         lastSyncUtc = snapshot.LastSyncUtc,
         lastSyncError = snapshot.LastSyncError,
+        groups = snapshot.Groups,
         messages = snapshot.Messages,
     });
 });
@@ -245,8 +246,10 @@ app.MapGet("/api/mail/{id:guid}", (Guid id, SteamMailStore mail) =>
 app.MapPost("/api/mail/sync", async (SteamMailService service, CancellationToken cancellationToken) =>
 {
     if (!service.IsConfigured) return Results.Conflict(new { message = "Steam Mail ist noch nicht konfiguriert." });
-    await service.SyncAsync(cancellationToken);
-    return Results.Ok(new { synced = true });
+    var synced = await service.SyncAsync(cancellationToken);
+    return synced
+        ? Results.Ok(new { synced = true })
+        : Results.Json(new { synced = false, message = "Mailbox konnte nicht synchronisiert werden." }, statusCode: StatusCodes.Status502BadGateway);
 });
 
 app.MapPatch("/api/mail/{id:guid}/read", (Guid id, MarkMailReadRequest request, SteamMailStore mail) =>

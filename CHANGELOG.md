@@ -2,6 +2,17 @@
 
 All notable changes to CS2 Account Hub are documented here.
 
+## [Unreleased]
+
+### Added
+
+- Optional second Steam Mail sender/domain area with configurable labels and routing.
+
+### Fixed
+
+- Kept Mail list and detail scrolling inside their panels instead of scrolling the page.
+- Restored stable full-row message interaction, debounced search updates and truthful sync failures.
+
 ## [0.2.0] - 2026-10-16
 
 ### Added

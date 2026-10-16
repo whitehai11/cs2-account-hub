@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const state = { view: 'control', accounts: [], allAccounts: [], selected: null, authSession: null, avatarBase64: null, loadout: null, timeline: [], focusMode: false, mail: { messages: [], selected: null, configured: false } };
+const state = { view: 'control', accounts: [], allAccounts: [], selected: null, authSession: null, avatarBase64: null, loadout: null, timeline: [], focusMode: false, mail: { messages: [], groups: [], selected: null, configured: false, activeGroup: 'primary', requestId: 0 } };
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -266,10 +266,13 @@ async function loadTimeline() {
 }
 
 async function loadMail() {
+  const requestId = ++state.mail.requestId;
   try {
     const query = encodeURIComponent($('mailSearch').value.trim());
     const unread = $('mailUnread').checked ? '&unread=true' : '';
-    const result = await api(`/api/mail?limit=100${query ? `&query=${query}` : ''}${unread}`);
+    const group = encodeURIComponent(state.mail.activeGroup || 'primary');
+    const result = await api(`/api/mail?limit=100&group=${group}${query ? `&query=${query}` : ''}${unread}`);
+    if (requestId !== state.mail.requestId) return;
     state.mail = { ...state.mail, ...result };
     renderMail();
   } catch (error) { toast(error.message, true); }
@@ -278,16 +281,30 @@ async function loadMail() {
 function renderMail() {
   const result = state.mail;
   const messages = result.messages || [];
+  const groups = result.groups?.length ? result.groups : [
+    { id: 'primary', label: 'Steam', total: messages.length, unread: messages.filter(message => !message.isRead).length, enabled: true },
+    { id: 'secondary', label: 'Zweite Domain', total: 0, unread: 0, enabled: false },
+  ];
+  const activeGroup = groups.find(group => group.id === state.mail.activeGroup) || groups[0];
   const unreadCount = messages.filter(message => !message.isRead).length;
   $('mailUnreadBadge').textContent = unreadCount;
   $('mailUnreadBadge').classList.toggle('hidden', unreadCount === 0);
+  $('mailGroupHeading').textContent = activeGroup.label;
   $('mailCount').textContent = `${messages.length} Nachricht${messages.length === 1 ? '' : 'en'}`;
   $('mailLastSync').textContent = result.lastSyncUtc ? `Zuletzt ${relativeTime(result.lastSyncUtc)}` : 'Noch nicht synchronisiert';
   const notice = $('mailNotice');
   const noticeText = !result.configured ? 'IMAP ist noch nicht konfiguriert. Die App läuft normal weiter; setze die Mailbox-Variablen auf dem Server, um Steam-Mails zu laden.' : result.lastSyncError ? result.lastSyncError : '';
   notice.textContent = noticeText; notice.classList.toggle('hidden', !noticeText); notice.classList.toggle('mail-notice-error', !!result.lastSyncError);
-  $('mailList').innerHTML = messages.length ? messages.map(message => `<button class="mail-row ${message.isRead ? '' : 'unread'} ${state.mail.selected?.id === message.id ? 'selected' : ''}" data-mail-id="${message.id}"><span class="mail-status" aria-label="${message.isRead ? 'Gelesen' : 'Ungelesen'}"></span><span class="mail-row-main"><strong>${esc(message.subject)}</strong><small>${esc(mailSenderLabel(message.sender))}</small><span>${esc(message.preview || 'Keine Textvorschau verfügbar.')}</span></span><time>${esc(relativeTime(message.receivedUtc))}</time></button>`).join('') : '<div class="mail-list-empty">Keine Steam-Mails gefunden.</div>';
-  document.querySelectorAll('[data-mail-id]').forEach(item => item.addEventListener('click', () => selectMail(item.dataset.mailId)));
+  document.querySelectorAll('[data-mail-group]').forEach(button => {
+    const group = groups.find(item => item.id === button.dataset.mailGroup);
+    const count = group?.unread || 0;
+    button.classList.toggle('active', button.dataset.mailGroup === activeGroup.id);
+    button.setAttribute('aria-selected', button.dataset.mailGroup === activeGroup.id ? 'true' : 'false');
+    button.querySelector('.mail-group-count').textContent = count;
+    button.title = group?.enabled ? `${group.total} Nachrichten` : 'Noch keine Domain konfiguriert';
+  });
+  const emptyText = activeGroup.enabled ? 'Keine Nachrichten in diesem Bereich.' : 'Zweite Domain noch nicht konfiguriert.';
+  $('mailList').innerHTML = messages.length ? messages.map(message => `<button type="button" class="mail-row ${message.isRead ? '' : 'unread'} ${state.mail.selected?.id === message.id ? 'selected' : ''}" role="listitem" data-mail-id="${message.id}"><span class="mail-status" aria-label="${message.isRead ? 'Gelesen' : 'Ungelesen'}"></span><span class="mail-row-main"><strong>${esc(message.subject)}</strong><small>${esc(mailSenderLabel(message.sender))}</small><span>${esc(message.preview || 'Keine Textvorschau verfügbar.')}</span></span><time>${esc(relativeTime(message.receivedUtc))}</time></button>`).join('') : `<div class="mail-list-empty">${esc(emptyText)}</div>`;
   if (state.mail.selected) renderMailDetail(state.mail.selected);
 }
 
@@ -312,8 +329,14 @@ function renderMailDetail(message) {
 
 async function syncMail() {
   setButtonBusy('syncMailButton', true, 'Synchronisiere ...');
-  try { await api('/api/mail/sync', { method: 'POST' }); toast('Steam Mail synchronisiert.'); await loadMail(); }
-  catch (error) { toast(error.message, true); }
+  try {
+    await api('/api/mail/sync', { method: 'POST' });
+    await loadMail();
+    toast('Mail-Postfach synchronisiert.');
+  } catch (error) {
+    await loadMail();
+    toast(state.mail.lastSyncError || error.message, true);
+  }
   finally { setButtonBusy('syncMailButton', false, 'Synchronisieren'); }
 }
 async function saveLoadout() {
@@ -358,6 +381,8 @@ $('refreshAllButton').addEventListener('click', loadControl);
 $('openTimelineButton').addEventListener('click', () => setView('personalize'));
 $('mailSearch').addEventListener('input', () => { clearTimeout(state.mail.searchTimer); state.mail.searchTimer = setTimeout(loadMail, 250); });
 $('mailUnread').addEventListener('change', loadMail); $('syncMailButton').addEventListener('click', syncMail);
+$('mailList').addEventListener('click', event => { const row = event.target.closest('[data-mail-id]'); if (row) selectMail(row.dataset.mailId); });
+document.querySelectorAll('[data-mail-group]').forEach(button => button.addEventListener('click', () => { if (state.mail.activeGroup === button.dataset.mailGroup) return; state.mail.activeGroup = button.dataset.mailGroup; state.mail.selected = null; loadMail(); }));
 $('logoutButton').addEventListener('click', async () => { await api('/api/web/logout', { method: 'POST' }); showLogin(); });
 $('addAccountButton').addEventListener('click', () => { $('addAccountForm').reset(); $('authProgress').classList.add('hidden'); $('guardLabel').classList.add('hidden'); $('guardSubmit').classList.add('hidden'); setAuthStage('Verbindung wird vorbereitet', 'Bitte einen Moment warten ...', 25); setButtonBusy('steamSubmitButton', false, 'Steam-Login starten'); $('addAccountDialog').showModal(); });
 $('closeDialog').addEventListener('click', () => $('addAccountDialog').close()); $('addAccountForm').addEventListener('submit', event => { event.preventDefault(); startAuth(); }); $('guardSubmit').addEventListener('click', submitGuard);

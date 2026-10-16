@@ -11,8 +11,15 @@ Configure the server with environment variables (or Docker secrets):
 - `CS2_HUB_IMAP_PASSWORD`
 - `CS2_HUB_IMAP_FOLDER` (default `INBOX`)
 - `CS2_HUB_IMAP_SENDERS` (optional comma-separated sender/domain allowlist)
+- `CS2_HUB_IMAP_SENDERS_SECONDARY` (optional comma-separated sender/domain allowlist for the second Mail area)
+- `CS2_HUB_IMAP_PRIMARY_LABEL` (optional UI label, default `Steam`)
+- `CS2_HUB_IMAP_SECONDARY_LABEL` (optional UI label, default `Zweite Domain`)
 - `CS2_HUB_IMAP_SYNC_SECONDS` (default `300`, bounded to 60–3600)
 
 Only sender, subject, received date and bounded plain-text previews are stored.
 HTML is converted to text and attachments are ignored. The app never sends
 mail and never changes mailbox flags; read/unread state is local to the hub.
+Allowed senders are classified into the primary and optional secondary UI area;
+messages that match neither configured group are ignored. The list and message
+detail each scroll inside their own panel so the page layout stays fixed while
+browsing a large mailbox.

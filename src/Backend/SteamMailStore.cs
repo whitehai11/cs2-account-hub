@@ -35,23 +35,26 @@ internal sealed class SteamMailStore
         }
     }
 
-    public SteamMailSnapshot Snapshot(string? query, bool? unread, int limit)
+    public SteamMailSnapshot Snapshot(string? query, bool? unread, string? groupId, int limit)
     {
         lock (_gate)
         {
             var normalizedQuery = query?.Trim();
-            var messages = _messages.Values
+            var matchingMessages = _messages.Values
                 .Where(message => unread is null || message.IsRead != unread.Value)
                 .Where(message => string.IsNullOrWhiteSpace(normalizedQuery)
                     || message.Subject.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase)
                     || message.Sender.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase)
                     || message.Preview.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            var messages = matchingMessages
+                .Where(message => string.IsNullOrWhiteSpace(groupId) || string.Equals(groupId, "all", StringComparison.OrdinalIgnoreCase) || string.Equals(message.GroupId, groupId, StringComparison.OrdinalIgnoreCase))
                 .OrderByDescending(message => message.ReceivedUtc)
                 .Take(Math.Clamp(limit, 1, 100))
                 .Select(ToDto)
                 .ToArray();
 
-            return new SteamMailSnapshot(messages, _lastSyncUtc, _lastSyncError, IsConfigured());
+            return new SteamMailSnapshot(messages, SteamMailRouting.Summarize(matchingMessages), _lastSyncUtc, _lastSyncError, IsConfigured());
         }
     }
 
@@ -62,7 +65,7 @@ internal sealed class SteamMailStore
             var message = _messages.GetValueOrDefault(id);
             return message is null
                 ? null
-                : new SteamMailDetailDto(message.Id, message.Subject, message.Sender, message.ReceivedUtc, message.IsRead, message.Body);
+                : new SteamMailDetailDto(message.Id, message.Subject, message.Sender, message.ReceivedUtc, message.IsRead, message.Body, message.GroupId);
         }
     }
 
@@ -91,6 +94,7 @@ internal sealed class SteamMailStore
                     existing.Preview = message.Preview;
                     existing.Body = message.Body;
                     existing.RemoteKey = message.RemoteKey;
+                    existing.GroupId = message.GroupId;
                 }
                 else
                 {
@@ -137,7 +141,7 @@ internal sealed class SteamMailStore
             : 30;
 
     private static SteamMailMessageDto ToDto(SteamMailRecord message) =>
-        new(message.Id, message.Subject, message.Sender, message.ReceivedUtc, message.IsRead, message.Preview, !string.IsNullOrWhiteSpace(message.Body));
+        new(message.Id, message.Subject, message.Sender, message.ReceivedUtc, message.IsRead, message.Preview, !string.IsNullOrWhiteSpace(message.Body), message.GroupId);
 
     private void SaveUnsafe()
     {
@@ -150,6 +154,7 @@ internal sealed class SteamMailStore
 
 internal sealed record SteamMailSnapshot(
     IReadOnlyList<SteamMailMessageDto> Messages,
+    IReadOnlyList<SteamMailGroupDto> Groups,
     DateTimeOffset? LastSyncUtc,
     string? LastSyncError,
     bool Configured);
@@ -180,4 +185,5 @@ internal sealed class SteamMailRecord
     public bool IsRead { get; set; }
     public string Preview { get; set; } = string.Empty;
     public string Body { get; set; } = string.Empty;
+    public string GroupId { get; set; } = "primary";
 }

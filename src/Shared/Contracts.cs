@@ -162,7 +162,8 @@ public sealed record SteamMailMessageDto(
     DateTimeOffset ReceivedUtc,
     bool IsRead,
     string Preview,
-    bool HasBody);
+    bool HasBody,
+    string GroupId = "primary");
 
 public sealed record SteamMailDetailDto(
     Guid Id,
@@ -170,7 +171,15 @@ public sealed record SteamMailDetailDto(
     string Sender,
     DateTimeOffset ReceivedUtc,
     bool IsRead,
-    string Body);
+    string Body,
+    string GroupId = "primary");
+
+public sealed record SteamMailGroupDto(
+    string Id,
+    string Label,
+    int Total,
+    int Unread,
+    bool Enabled);
 
 public sealed record LoadoutPresetDto(
     string Name,

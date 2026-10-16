@@ -24,9 +24,9 @@ internal sealed class SteamMailService
         !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CS2_HUB_IMAP_USERNAME")) &&
         !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CS2_HUB_IMAP_PASSWORD"));
 
-    public async Task SyncAsync(CancellationToken cancellationToken)
+    public async Task<bool> SyncAsync(CancellationToken cancellationToken)
     {
-        if (!IsConfigured) return;
+        if (!IsConfigured) return false;
 
         try
         {
@@ -45,7 +45,6 @@ internal sealed class SteamMailService
             var since = DateTime.UtcNow.AddDays(-GetRetentionDays());
             var uids = await folder.SearchAsync(SearchQuery.DeliveredAfter(since), cancellationToken);
             var summaries = await folder.FetchAsync(uids, MessageSummaryItems.UniqueId | MessageSummaryItems.Envelope | MessageSummaryItems.BodyStructure | MessageSummaryItems.Flags | MessageSummaryItems.InternalDate, cancellationToken);
-            var allowed = GetAllowedSenders();
             var records = new List<SteamMailRecord>();
 
             foreach (var summary in summaries.OrderByDescending(item => item.InternalDate ?? item.Envelope?.Date ?? DateTimeOffset.MinValue))
@@ -54,7 +53,8 @@ internal sealed class SteamMailService
                 var sender = summary.Envelope?.From?.Mailboxes.FirstOrDefault()?.Address
                     ?? summary.Envelope?.From?.FirstOrDefault()?.ToString()
                     ?? "Unbekannter Absender";
-                if (!IsAllowedSender(sender, allowed)) continue;
+                var groupId = SteamMailRouting.ClassifySender(sender);
+                if (groupId is null) continue;
 
                 var body = await ReadTextBodyAsync(folder, summary, cancellationToken);
                 var subject = Normalize(summary.Envelope?.Subject, "(Ohne Betreff)", 300);
@@ -72,16 +72,19 @@ internal sealed class SteamMailService
                     IsRead = summary.Flags?.HasFlag(MessageFlags.Seen) == true,
                     Body = body,
                     Preview = NormalizePreview(body),
+                    GroupId = groupId,
                 });
             }
 
             _store.Merge(records);
             await client.DisconnectAsync(true, cancellationToken);
+            return true;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             _store.SetSyncError(exception);
             _logger.LogWarning("Steam Mail sync failed ({ExceptionType}).", exception.GetType().Name);
+            return false;
         }
     }
 
@@ -91,32 +94,6 @@ internal sealed class SteamMailService
         var entity = await folder.GetBodyPartAsync(summary.UniqueId, textPart, cancellationToken);
         return NormalizeBody(entity is TextPart text ? text.Text : entity.ToString());
     }
-
-    private static bool IsAllowedSender(string sender, IReadOnlyList<string> configured)
-    {
-        if (configured.Count > 0)
-        {
-            var normalizedSender = sender.Trim().ToLowerInvariant();
-            var senderDomain = normalizedSender[(normalizedSender.LastIndexOf('@') + 1)..];
-            return configured.Any(rule =>
-            {
-                var normalizedRule = rule.Trim().TrimStart('@').ToLowerInvariant();
-                return normalizedSender == normalizedRule ||
-                    (senderDomain == normalizedRule || senderDomain.EndsWith("." + normalizedRule, StringComparison.Ordinal));
-            });
-        }
-
-        var at = sender.LastIndexOf('@');
-        if (at < 0) return false;
-        var domain = sender[(at + 1)..].Trim().TrimEnd('>').ToLowerInvariant();
-        return domain is "steampowered.com" or "steamcommunity.com" || domain.EndsWith(".steampowered.com", StringComparison.Ordinal);
-    }
-
-    private static IReadOnlyList<string> GetAllowedSenders() =>
-        (Environment.GetEnvironmentVariable("CS2_HUB_IMAP_SENDERS") ?? string.Empty)
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(value => value.Length <= 320)
-            .ToArray();
 
     private static string NormalizeBody(string? value)
     {
