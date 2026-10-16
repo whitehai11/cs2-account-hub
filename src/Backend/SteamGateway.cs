@@ -1,5 +1,6 @@
 using System.Text.Json;
 using CS2AccountHub.Contracts;
+using Microsoft.Extensions.Logging;
 using NfaLoader.Models;
 using NfaLoader.Services;
 
@@ -7,7 +8,7 @@ internal sealed class SteamGateway : ISteamAccountGateway
 {
     private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
     private readonly SteamCredentialsAuthService _auth = new();
-    private readonly CsPremierScoreService _status = new();
+    private readonly CsPremierScoreService _status;
     private readonly SteamPrimeStatusService _prime = new();
     private readonly CsLoadoutService _loadout = new();
     private readonly CsMatchHistoryService _matches = new();
@@ -17,10 +18,11 @@ internal sealed class SteamGateway : ISteamAccountGateway
     private readonly TokenProtector _tokens;
     private readonly SettingsStore _settings;
 
-    public SteamGateway(TokenProtector tokens, SettingsStore settings)
+    public SteamGateway(TokenProtector tokens, SettingsStore settings, ILogger<CsPremierScoreService> statusLogger)
     {
         _tokens = tokens;
         _settings = settings;
+        _status = new CsPremierScoreService(statusLogger);
     }
 
     public Task<CredentialsAuthResult> AuthenticateAsync(

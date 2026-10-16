@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Net;
+using Microsoft.Extensions.Logging;
 using NfaLoader.Localization;
 using NfaLoader.Models;
 
@@ -19,12 +21,20 @@ internal sealed class CsPremierScoreService
     private static readonly TimeSpan HelloWaitTimeout = TimeSpan.FromSeconds(11);
     private static readonly TimeSpan CachedHelloPollTimeout = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan GcReconnectDelay = TimeSpan.FromSeconds(2.5);
-    private static readonly TimeSpan HelloTotalBudget = TimeSpan.FromSeconds(100);
+    private static readonly TimeSpan RetryWelcomeTimeout = TimeSpan.FromSeconds(8);
+    private static readonly TimeSpan HelloTotalBudget = TimeSpan.FromSeconds(45);
 
     private static readonly HttpClient HttpClient = new()
     {
         Timeout = TimeSpan.FromSeconds(30)
     };
+
+    private readonly ILogger<CsPremierScoreService> _logger;
+
+    public CsPremierScoreService(ILogger<CsPremierScoreService> logger)
+    {
+        _logger = logger;
+    }
 
     public async Task<CsPremierScoreResult> QueryAsync(
         string refreshToken,
@@ -37,21 +47,33 @@ internal sealed class CsPremierScoreService
         }
 
         var accountId = CsGcSession.GetAccountId(steamId64);
+        var checkId = Guid.NewGuid();
+        var startedAt = Stopwatch.GetTimestamp();
+        var helloDeadline = DateTimeOffset.UtcNow + HelloTotalBudget;
+        CsAccountProfile? helloData = null;
+        var usedProfileFallback = false;
+        _logger.LogInformation("GC status check {CheckId} started for account {AccountId}.", checkId, accountId);
+
         await using var cmClient = new SteamCmClient(HttpClient);
         await cmClient.ConnectAndLogOnAsync(refreshToken, steamId, cancellationToken);
+        _logger.LogDebug("GC status check {CheckId} completed CM login for account {AccountId} after {ElapsedMs:0} ms.", checkId, accountId, Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
 
         try
         {
             var helloTask = WaitForMatchmakingHelloAsync(cmClient, cancellationToken);
 
             var webSession = await SteamWebSession.BuildAsync(cmClient, refreshToken, steamId, cancellationToken);
+            _logger.LogDebug("GC status check {CheckId} built the web session for account {AccountId} after {ElapsedMs:0} ms.", checkId, accountId, Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
 
             await cmClient.SetGamesPlayedAsync([CsGcSession.Cs2AppId], cancellationToken);
-            await CsGcSession.ConnectAsync(cmClient, cancellationToken);
+            await CsGcSession.RequestWelcomeAsync(
+                cmClient,
+                RemainingTimeout(helloDeadline, TimeSpan.FromSeconds(45)),
+                cancellationToken);
+            _logger.LogDebug("GC status check {CheckId} received the initial GC welcome for account {AccountId} after {ElapsedMs:0} ms.", checkId, accountId, Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
 
-            // Cooldown/VAC can only come from the GC's MatchmakingGC2ClientHello(9110): PlayersProfile for your own
-            // account always has an empty penalty field. The 9110 waiter is attached before entering 730 so a 9110 pushed unprompted
-            // during the welcome phase is not missed; here we also send the 9109 request, then request PlayersProfile as usual for the Premier rating/level.
+            // The 9110 waiter is attached before entering 730 so a 9110 pushed unprompted during the welcome phase is not missed.
+            // PlayersProfile is still requested for Premier rating/level, and its restriction fields are used only when the payload explicitly contains them.
             await cmClient.SendGcProtobufMessageAsync(
                 CsGcSession.Cs2AppId,
                 MatchmakingClient2GCHello,
@@ -72,13 +94,13 @@ internal sealed class CsPremierScoreService
 
             var profileMessage = await profileTask;
             var profile = DecodePlayersProfile(accountId, profileMessage.Payload);
+            _logger.LogDebug("GC status check {CheckId} received PlayersProfile for account {AccountId}: restrictionFields={HasRestrictionData}, rankings={RankingCount}, playerLevel={PlayerLevel}.", checkId, accountId, profile.HasRestrictionData, profile.Rankings.Count, profile.PlayerLevel);
 
-            var helloData = await helloTask;
+            helloData = await helloTask;
             helloData ??= await WaitForMatchmakingHelloAsync(
                 cmClient,
                 CachedHelloPollTimeout,
                 cancellationToken);
-            var helloDeadline = DateTimeOffset.UtcNow + HelloTotalBudget;
 
             for (var cycle = 2;
                 helloData is null && cycle <= MaxHelloCycles && DateTimeOffset.UtcNow < helloDeadline;
@@ -92,7 +114,11 @@ internal sealed class CsPremierScoreService
                     await Task.Delay(GcReconnectDelay, cancellationToken);
                     helloTask = WaitForMatchmakingHelloAsync(cmClient, cancellationToken);
                     await cmClient.SetGamesPlayedAsync([CsGcSession.Cs2AppId], cancellationToken);
-                    await CsGcSession.ConnectAsync(cmClient, cancellationToken);
+                    await CsGcSession.RequestWelcomeAsync(
+                        cmClient,
+                        RemainingTimeout(helloDeadline, RetryWelcomeTimeout),
+                        cancellationToken);
+                    _logger.LogDebug("GC status check {CheckId} received reconnect welcome for account {AccountId} on cycle {Cycle} after {ElapsedMs:0} ms.", checkId, accountId, cycle, Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
                 }
                 catch (TimeoutException)
                 {
@@ -112,6 +138,9 @@ internal sealed class CsPremierScoreService
                     cancellationToken);
             }
 
+            var restrictionData = helloData ?? (profile.HasRestrictionData ? profile : null);
+            usedProfileFallback = helloData is null && profile.HasRestrictionData;
+
             var premier = profile.Rankings.FirstOrDefault(ranking =>
                 ranking.RankTypeId == PremierRankTypeId);
 
@@ -120,14 +149,15 @@ internal sealed class CsPremierScoreService
                 accountId,
                 premier,
                 profile.Rankings,
-                helloData?.PenaltySeconds,
-                helloData?.PenaltyReason,
-                helloData?.VacBanned,
+                restrictionData?.PenaltySeconds,
+                restrictionData?.PenaltyReason,
+                restrictionData?.VacBanned,
                 profile.PlayerLevel,
                 profile.InMatch);
         }
         finally
         {
+            _logger.LogInformation("GC status check {CheckId} finished for account {AccountId} in {ElapsedMs:0} ms with cooldownData={HasCooldownData}, usedProfileFallback={UsedProfileFallback}.", checkId, accountId, Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds, helloData is not null || usedProfileFallback, usedProfileFallback);
             try
             {
                 await cmClient.SetGamesPlayedAsync([], CancellationToken.None);
@@ -146,6 +176,13 @@ internal sealed class CsPremierScoreService
         CancellationToken cancellationToken)
     {
         return await WaitForMatchmakingHelloAsync(cmClient, HelloWaitTimeout, cancellationToken);
+    }
+
+    private static TimeSpan RemainingTimeout(DateTimeOffset deadline, TimeSpan maximum)
+    {
+        var remaining = deadline - DateTimeOffset.UtcNow;
+        if (remaining <= TimeSpan.Zero) return TimeSpan.FromMilliseconds(1);
+        return remaining < maximum ? remaining : maximum;
     }
 
     private static async Task<CsAccountProfile?> WaitForMatchmakingHelloAsync(
@@ -214,6 +251,7 @@ internal sealed class CsPremierScoreService
         uint penaltySeconds = 0;
         uint penaltyReason = 0;
         var vacBanned = 0;
+        var hasRestrictionData = false;
         int? playerLevel = null;
         var inMatch = false;
         var rankings = new List<CsRankingInfo>();
@@ -239,15 +277,18 @@ internal sealed class CsPremierScoreService
                     // Read it as int32, and turn anything ≤0 (expired / no cooldown) into zero.
                     var penalty = unchecked((int)reader.ReadVarint(wireType));
                     penaltySeconds = penalty > 0 ? (uint)penalty : 0;
+                    hasRestrictionData = true;
                     break;
                 }
 
                 case 5:
                     penaltyReason = (uint)reader.ReadVarint(wireType);
+                    hasRestrictionData = true;
                     break;
 
                 case 6:
                     vacBanned = (int)reader.ReadVarint(wireType);
+                    hasRestrictionData = true;
                     break;
 
                 case 7:
@@ -272,7 +313,8 @@ internal sealed class CsPremierScoreService
             penaltyReason,
             vacBanned,
             playerLevel,
-            inMatch);
+            inMatch,
+            hasRestrictionData);
     }
 
     private static CsRankingInfo DecodeRanking(byte[] body)
@@ -335,5 +377,6 @@ internal sealed class CsPremierScoreService
         uint PenaltyReason,
         int VacBanned,
         int? PlayerLevel,
-        bool InMatch);
+        bool InMatch,
+        bool HasRestrictionData);
 }
