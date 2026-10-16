@@ -13,6 +13,12 @@ test('does not discard restriction fields returned with the players profile', ()
   expect(serviceSource).toContain('HasRestrictionData');
 });
 
+test('extracts the matchmaking hello embedded in the GC welcome payload', () => {
+  expect(serviceSource).toContain('TryDecodeMatchmakingHelloFromWelcome');
+  expect(serviceSource).toContain('var welcomePayload = await CsGcSession.RequestWelcomeAsync');
+  expect(serviceSource).toContain('DecodeAccountProfile(welcomeHelloPayload)');
+});
+
 test('emits safe phase diagnostics for slow GC checks', () => {
   expect(serviceSource).toContain('GC status check {CheckId} started for account {AccountId}.');
   expect(serviceSource).toContain('GC status check {CheckId} finished for account {AccountId}');

@@ -73,10 +73,15 @@ internal sealed class CsPremierScoreService
             _logger.LogDebug("GC status check {CheckId} built the web session for account {AccountId} after {ElapsedMs:0} ms.", checkId, accountId, Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
 
             await cmClient.SetGamesPlayedAsync([CsGcSession.Cs2AppId], cancellationToken);
-            await CsGcSession.RequestWelcomeAsync(
+            var welcomePayload = await CsGcSession.RequestWelcomeAsync(
                 cmClient,
                 RemainingTimeout(helloDeadline, TimeSpan.FromSeconds(45)),
                 cancellationToken);
+            var welcomeHelloPayload = TryDecodeMatchmakingHelloFromWelcome(welcomePayload);
+            if (welcomeHelloPayload is not null)
+            {
+                helloData = DecodeAccountProfile(welcomeHelloPayload);
+            }
             _logger.LogDebug("GC status check {CheckId} received the initial GC welcome for account {AccountId} after {ElapsedMs:0} ms.", checkId, accountId, Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
 
             // The 9110 waiter is attached before entering 730 so a 9110 pushed unprompted during the welcome phase is not missed.
@@ -103,11 +108,14 @@ internal sealed class CsPremierScoreService
             var profile = DecodePlayersProfile(accountId, profileMessage.Payload);
             _logger.LogDebug("GC status check {CheckId} received PlayersProfile for account {AccountId}: restrictionFields={HasRestrictionData}, rankings={RankingCount}, playerLevel={PlayerLevel}.", checkId, accountId, profile.HasRestrictionData, profile.Rankings.Count, profile.PlayerLevel);
 
-            helloData = await helloTask;
-            helloData ??= await WaitForMatchmakingHelloAsync(
-                cmClient,
-                CachedHelloPollTimeout,
-                cancellationToken);
+            if (helloData is null)
+            {
+                helloData = await helloTask;
+                helloData ??= await WaitForMatchmakingHelloAsync(
+                    cmClient,
+                    CachedHelloPollTimeout,
+                    cancellationToken);
+            }
 
             for (var cycle = 2;
                 helloData is null && cycle <= MaxHelloCycles && DateTimeOffset.UtcNow < helloDeadline;
@@ -121,10 +129,14 @@ internal sealed class CsPremierScoreService
                     await Task.Delay(GcReconnectDelay, cancellationToken);
                     helloTask = WaitForMatchmakingHelloAsync(cmClient, cancellationToken);
                     await cmClient.SetGamesPlayedAsync([CsGcSession.Cs2AppId], cancellationToken);
-                    await CsGcSession.RequestWelcomeAsync(
+                    var reconnectWelcomePayload = await CsGcSession.RequestWelcomeAsync(
                         cmClient,
                         RemainingTimeout(helloDeadline, RetryWelcomeTimeout),
                         cancellationToken);
+                    var reconnectHelloPayload = TryDecodeMatchmakingHelloFromWelcome(reconnectWelcomePayload);
+                    helloData = reconnectHelloPayload is null
+                        ? null
+                        : DecodeAccountProfile(reconnectHelloPayload);
                     _logger.LogDebug("GC status check {CheckId} received reconnect welcome for account {AccountId} on cycle {Cycle} after {ElapsedMs:0} ms.", checkId, accountId, cycle, Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
                 }
                 catch (TimeoutException)
@@ -138,11 +150,14 @@ internal sealed class CsPremierScoreService
                     MatchmakingClient2GCHello,
                     [],
                     cancellationToken);
-                helloData = await helloTask;
-                helloData ??= await WaitForMatchmakingHelloAsync(
-                    cmClient,
-                    CachedHelloPollTimeout,
-                    cancellationToken);
+                if (helloData is null)
+                {
+                    helloData = await helloTask;
+                    helloData ??= await WaitForMatchmakingHelloAsync(
+                        cmClient,
+                        CachedHelloPollTimeout,
+                        cancellationToken);
+                }
             }
 
             var restrictionData = helloData ?? (profile.HasRestrictionData ? profile : null);
@@ -192,6 +207,33 @@ internal sealed class CsPremierScoreService
         var remaining = deadline - DateTimeOffset.UtcNow;
         if (remaining <= TimeSpan.Zero) return TimeSpan.FromMilliseconds(1);
         return remaining < maximum ? remaining : maximum;
+    }
+
+    // CMsgClientWelcome.game_data2 (field 6) carries the same
+    // CMsgGCCStrike15_v2_MatchmakingGC2ClientHello payload as message 9110.
+    // Steam commonly delivers the cooldown state this way instead of emitting a separate 9110.
+    private static byte[]? TryDecodeMatchmakingHelloFromWelcome(byte[] welcomePayload)
+    {
+        try
+        {
+            var reader = new SteamProtoReader(welcomePayload);
+            while (reader.TryReadTag(out var field, out var wireType))
+            {
+                if (field == 6)
+                {
+                    var payload = reader.ReadLengthDelimited(wireType);
+                    return payload.Length == 0 ? null : payload;
+                }
+
+                reader.Skip(wireType);
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            // A malformed optional welcome field must not make the whole status check fail.
+        }
+
+        return null;
     }
 
     private static async Task<CsAccountProfile?> WaitForMatchmakingHelloAsync(
