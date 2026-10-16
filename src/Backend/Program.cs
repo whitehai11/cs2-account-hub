@@ -874,6 +874,11 @@ internal sealed class OperationWorker : BackgroundService
             string? previousHealth = null;
             bool? previousInMatch = null;
             int? previousLoadoutMismatches = null;
+            AccountSection previousSection = AccountSection.NotPlayReady;
+            bool? previousGcVacBanned = null;
+            bool? previousSteamVacBanned = null;
+            bool? previousGameBanned = null;
+            bool? previousCs2Owned = null;
             var previousCooldownActive = false;
             var previousCooldownNotificationSent = false;
             try
@@ -883,6 +888,11 @@ internal sealed class OperationWorker : BackgroundService
                 previousHealth = account.HealthStatus;
                 previousInMatch = account.InMatch;
                 previousLoadoutMismatches = account.LoadoutMismatchCount;
+                previousSection = account.Section;
+                previousGcVacBanned = account.VacBanned;
+                previousSteamVacBanned = account.SteamVacBanned;
+                previousGameBanned = account.SteamGameBanned;
+                previousCs2Owned = account.Cs2Owned;
                 previousCooldownActive = account.CooldownSeconds is > 0 || account.CooldownEndsUtc > DateTimeOffset.UtcNow;
                 previousCooldownNotificationSent = account.CooldownNotificationSent;
 
@@ -914,6 +924,7 @@ internal sealed class OperationWorker : BackgroundService
                     account.StatusUpdatedUtc = DateTimeOffset.UtcNow;
                     account.LastLoginUtc = DateTimeOffset.UtcNow;
                     _accounts.Upsert(account);
+                    await RecordStatusTransitionsAsync(account, previousSection, previousGcVacBanned, previousSteamVacBanned, previousGameBanned, previousCs2Owned, stoppingToken);
 
                     if (loginWasRequired)
                     {
@@ -934,6 +945,7 @@ internal sealed class OperationWorker : BackgroundService
 
                     if (previousHealth is not null && !string.Equals(previousHealth, account.HealthStatus, StringComparison.Ordinal))
                     {
+                        _events.Append(account.Id, "status", "GC-Gesundheit geändert", $"Neuer Zustand: {account.HealthStatus}.", account.HealthStatus == "healthy" ? "success" : "warning");
                         await NotifyEventAsync(account, "GC-Gesundheit geändert", $"Neuer Zustand: {account.HealthStatus}.", 0xF1C40F, stoppingToken);
                     }
                     if (previousInMatch is not null && previousInMatch != account.InMatch)
@@ -1041,10 +1053,70 @@ internal sealed class OperationWorker : BackgroundService
         }
     }
 
-    private async Task NotifyEventAsync(AccountRecord account, string title, string description, int color, CancellationToken cancellationToken)
+    private async Task RecordStatusTransitionsAsync(
+        AccountRecord account,
+        AccountSection previousSection,
+        bool? previousGcVacBanned,
+        bool? previousSteamVacBanned,
+        bool? previousGameBanned,
+        bool? previousCs2Owned,
+        CancellationToken cancellationToken)
+    {
+        var gcVacChanged = previousGcVacBanned is not null && previousGcVacBanned != account.VacBanned;
+        var steamVacChanged = previousSteamVacBanned is not null && previousSteamVacBanned != account.SteamVacBanned;
+        var gameBanChanged = previousGameBanned is not null && previousGameBanned != account.SteamGameBanned;
+        var ownershipChanged = previousCs2Owned is not null && previousCs2Owned != account.Cs2Owned;
+
+        if (gcVacChanged)
+        {
+            var active = account.VacBanned is true;
+            _events.Append(account.Id, "ban", active ? "GC meldet einen VAC-Ban" : "GC-VAC-Status geändert",
+                active ? "Der Game Coordinator meldet einen VAC-Ban. Der Account wurde in den VAC-Bereich verschoben." : "Der Game Coordinator meldet keinen aktiven VAC-Ban mehr.",
+                active ? "error" : "success");
+        }
+
+        if (steamVacChanged)
+        {
+            var active = account.SteamVacBanned is true;
+            _events.Append(account.Id, "ban", active ? "Steam-VAC-Ban erkannt" : "Steam-VAC-Status geändert",
+                active ? "Steam PlayerBans meldet einen VAC-Ban." : "Steam PlayerBans meldet keinen aktiven VAC-Ban mehr.",
+                active ? "error" : "success");
+        }
+
+        if ((gcVacChanged && account.VacBanned is true) || (steamVacChanged && account.SteamVacBanned is true))
+        {
+            await NotifyEventAsync(account, "VAC-Ban erkannt", "Ein VAC-Ban wurde neu erkannt. Der Account wurde automatisch aus Play Ready entfernt.", 0xE74C3C, cancellationToken, mentionEveryone: true);
+        }
+
+        if (gameBanChanged)
+        {
+            var active = account.SteamGameBanned is true;
+            _events.Append(account.Id, "ban", active ? "Steam Game-Ban erkannt" : "Steam Game-Ban entfernt",
+                active ? "Steam PlayerBans meldet einen aktiven Game-Ban." : "Steam PlayerBans meldet keinen aktiven Game-Ban mehr.",
+                active ? "error" : "success");
+            if (active)
+            {
+                await NotifyEventAsync(account, "Steam Game-Ban erkannt", "Ein Game-Ban wurde neu erkannt. Der Account wurde aus Play Ready entfernt.", 0xE67E22, cancellationToken, mentionEveryone: true);
+            }
+        }
+
+        if (ownershipChanged)
+        {
+            _events.Append(account.Id, "status", "CS2-Besitz geändert",
+                account.Cs2Owned is true ? "CS2 wurde als vorhanden bestätigt." : account.Cs2Owned is false ? "CS2 ist für diesen Account nicht verfügbar." : "Der CS2-Besitz ist unbekannt.",
+                account.Cs2Owned is true ? "success" : "warning");
+        }
+
+        if (previousSection != account.Section)
+        {
+            _events.Append(account.Id, "status", "Account-Kategorie geändert", $"{previousSection} → {account.Section}.", account.Section == AccountSection.VacBanned ? "error" : account.Section == AccountSection.PlayReady ? "success" : "warning");
+        }
+    }
+
+    private async Task NotifyEventAsync(AccountRecord account, string title, string description, int color, CancellationToken cancellationToken, bool mentionEveryone = false)
     {
         if (!_notifier.IsConfigured) return;
-        await _notifier.SendAccountEventAsync(account, title, description, color, cancellationToken);
+        await _notifier.SendAccountEventAsync(account, title, description, color, cancellationToken, mentionEveryone);
     }
 
     private async Task MarkLoginRequiresReauthenticationAsync(AccountRecord account)
