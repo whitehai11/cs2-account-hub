@@ -28,6 +28,15 @@ test('MAFile codes use a protected endpoint and account-name autofill', () => {
   expect(htmlSource).toContain('data-view="authenticator"');
 });
 
+test('authenticator codes are live with an expiry countdown instead of a fetch button', () => {
+  expect(appSource).toContain('data-authenticator-progress');
+  expect(appSource).toContain('clearAuthenticatorTimers');
+  expect(appSource).toContain('refreshAuthenticatorCode');
+  expect(appSource).toContain('authenticatorCodeExpiresAt');
+  expect(appSource).toContain('Gültig noch');
+  expect(appSource).not.toContain('data-authenticator-code');
+});
+
 test('the upstream licensing and scope are documented', () => {
   expect(noticesSource).toContain('https://github.com/geel9/SteamAuth');
   expect(noticesSource).toContain('Only the shared-secret-based code-generation algorithm is used.');

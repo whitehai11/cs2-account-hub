@@ -112,13 +112,31 @@ function accountAttention(account) {
 }
 function signalTitle(item) { return item?.title || 'Ereignis'; }
 function mailSenderLabel(sender) { return sender?.replace(/^.*</, '').replace(/>$/, '') || 'Steam'; }
-function showLogin() { $('appView').classList.add('hidden'); $('loginView').classList.remove('hidden'); setButtonBusy('dashboardLoginButton', false, 'Dashboard öffnen'); }
+function showLogin() { clearAuthenticatorTimers(); $('appView').classList.add('hidden'); $('loginView').classList.remove('hidden'); setButtonBusy('dashboardLoginButton', false, 'Dashboard öffnen'); }
 function showApp(username) { $('loginView').classList.add('hidden'); $('appView').classList.remove('hidden'); $('userLabel').textContent = username || ''; }
 function toast(message, bad = false) { const el = $('toast'); el.textContent = message; el.classList.remove('hidden'); el.style.background = bad ? '#a52318' : '#17324d'; setTimeout(() => el.classList.add('hidden'), 4500); }
 function setButtonBusy(id, busy, label) { const button = $(id); if (!button) return; button.disabled = busy; button.querySelector('.button-spinner')?.classList.toggle('hidden', !busy); const text = button.querySelector('.button-text'); if (text && label) text.textContent = label; }
 function setAuthStage(title, message, progress = 25) { if ($('authStage')) $('authStage').textContent = title; if ($('authMessage')) $('authMessage').textContent = message; if ($('authProgressBar')) $('authProgressBar').style.width = `${progress}%`; }
+function clearAuthenticatorTimer(id) {
+  const timer = state.authenticatorTimers[id];
+  if (!timer) return;
+  clearTimeout(timer.refresh);
+  clearInterval(timer.tick);
+  delete state.authenticatorTimers[id];
+}
+function clearAuthenticatorTimers() { Object.keys(state.authenticatorTimers).forEach(clearAuthenticatorTimer); }
+function updateAuthenticatorCountdown(id) {
+  const timer = state.authenticatorTimers[id];
+  const metaElement = $(`authenticatorCodeMeta-${id}`);
+  const progressElement = $(`authenticatorCodeProgress-${id}`);
+  if (!timer || !metaElement || !progressElement) return;
+  const remaining = Math.max(0, Math.ceil((timer.authenticatorCodeExpiresAt - Date.now()) / 1000));
+  metaElement.textContent = remaining ? `Gültig noch ${remaining} Sek.` : 'Code wird aktualisiert ...';
+  progressElement.style.width = `${Math.min(100, (remaining / timer.durationSeconds) * 100)}%`;
+}
 
 function setView(view) {
+  if (state.view === 'authenticator' && view !== 'authenticator') clearAuthenticatorTimers();
   state.view = view;
   document.querySelectorAll('.nav-item').forEach(item => item.classList.toggle('active', item.dataset.view === view));
   const settings = view === 'loadout' || view === 'personalize';
@@ -339,32 +357,46 @@ async function loadAuthenticators() {
 
 function renderAuthenticators() {
   const authenticators = state.authenticators || [];
+  clearAuthenticatorTimers();
   $('authenticatorCount').textContent = authenticators.length;
   $('authenticatorList').innerHTML = authenticators.length ? authenticators.map(authenticator => `
     <article class="authenticator-row" data-authenticator-id="${authenticator.id}">
       <div class="authenticator-identity"><span class="authenticator-icon">2FA</span><div><strong>${esc(authenticator.accountName)}</strong><small>${authenticator.linkedAccountId ? `Verknüpft mit ${esc(authenticator.linkedDisplayName || 'Steam-Account')}` : 'Kein passender Account im Hub gefunden'}</small><time>Importiert ${esc(formatDate(authenticator.importedUtc))}</time></div></div>
-      <div class="authenticator-code"><code id="authenticatorCode-${authenticator.id}">•••••</code><small id="authenticatorCodeMeta-${authenticator.id}">Noch nicht abgerufen</small></div>
-      <div class="authenticator-actions"><button type="button" class="primary" data-authenticator-code>Code abrufen</button><button type="button" class="danger-action" data-authenticator-delete>Entfernen</button></div>
+      <div class="authenticator-code" aria-live="polite"><code id="authenticatorCode-${authenticator.id}">•••••</code><div class="authenticator-code-meta"><small id="authenticatorCodeMeta-${authenticator.id}">Code wird geladen ...</small><span>30 Sek.</span></div><div class="authenticator-progress" aria-hidden="true"><span id="authenticatorCodeProgress-${authenticator.id}" data-authenticator-progress></span></div></div>
+      <div class="authenticator-actions"><button type="button" class="danger-action" data-authenticator-delete>Entfernen</button></div>
     </article>`).join('') : '<div class="authenticator-empty"><strong>Noch keine MAFile importiert</strong><span>Wähle oben eine entschlüsselte MAFile aus, um Steam-Guard-Codes sicher im Hub zu erzeugen.</span></div>';
+  authenticators.forEach(authenticator => refreshAuthenticatorCode(authenticator.id));
 }
 
-async function fetchAuthenticatorCode(id, button) {
+async function refreshAuthenticatorCode(id) {
   const codeElement = $(`authenticatorCode-${id}`);
   const metaElement = $(`authenticatorCodeMeta-${id}`);
-  if (!codeElement || !metaElement) return;
-  button.disabled = true;
-  button.textContent = 'Abrufen ...';
+  const progressElement = $(`authenticatorCodeProgress-${id}`);
+  if (!codeElement || !metaElement || !progressElement) return;
+  clearAuthenticatorTimer(id);
+  codeElement.textContent = '•••••';
+  metaElement.textContent = 'Code wird aktualisiert ...';
+  progressElement.style.width = '0%';
   try {
     const result = await api(`/api/authenticators/${id}/code`, { method: 'POST' });
+    if (state.view !== 'authenticator' || !$(`authenticatorCode-${id}`)) return;
     codeElement.textContent = result.code;
-    metaElement.textContent = `Gültig noch ${result.secondsRemaining} Sek.`;
-    clearTimeout(state.authenticatorTimers[id]);
-    state.authenticatorTimers[id] = setTimeout(() => {
-      codeElement.textContent = '•••••';
-      metaElement.textContent = 'Code abgelaufen';
-    }, Math.max(1, result.secondsRemaining) * 1000);
-  } catch (error) { toast(error.message, true); }
-  finally { button.disabled = false; button.textContent = 'Code abrufen'; }
+    const durationSeconds = 30;
+    const secondsRemaining = Math.max(1, Number(result.secondsRemaining) || durationSeconds);
+    state.authenticatorTimers[id] = {
+      authenticatorCodeExpiresAt: Date.now() + secondsRemaining * 1000,
+      durationSeconds,
+      tick: setInterval(() => updateAuthenticatorCountdown(id), 1000),
+      refresh: null,
+    };
+    updateAuthenticatorCountdown(id);
+    state.authenticatorTimers[id].refresh = setTimeout(() => refreshAuthenticatorCode(id), secondsRemaining * 1000 + 150);
+  } catch (error) {
+    if (state.view !== 'authenticator') return;
+    metaElement.textContent = error.message || 'Code konnte nicht geladen werden';
+    progressElement.style.width = '0%';
+    state.authenticatorTimers[id] = { tick: null, refresh: setTimeout(() => refreshAuthenticatorCode(id), 5000) };
+  }
 }
 
 async function importAuthenticator() {
@@ -388,7 +420,7 @@ async function deleteAuthenticator(id) {
   if (!authenticator || !window.confirm(`Authenticator für „${authenticator.accountName}“ wirklich entfernen? Der verschlüsselte Shared Secret wird gelöscht.`)) return;
   try {
     await api(`/api/authenticators/${id}`, { method: 'DELETE' });
-    clearTimeout(state.authenticatorTimers[id]);
+    clearAuthenticatorTimer(id);
     await loadAuthenticators();
     toast('Authenticator entfernt.');
   } catch (error) { toast(error.message, true); }
@@ -534,10 +566,9 @@ $('authenticatorList').addEventListener('click', event => {
   const row = event.target.closest('[data-authenticator-id]');
   if (!row) return;
   const id = row.dataset.authenticatorId;
-  if (event.target.closest('[data-authenticator-code]')) fetchAuthenticatorCode(id, event.target.closest('[data-authenticator-code]'));
   if (event.target.closest('[data-authenticator-delete]')) deleteAuthenticator(id);
 });
-$('logoutButton').addEventListener('click', async () => { await api('/api/web/logout', { method: 'POST' }); showLogin(); });
+$('logoutButton').addEventListener('click', async () => { clearAuthenticatorTimers(); await api('/api/web/logout', { method: 'POST' }); showLogin(); });
 $('addAccountButton').addEventListener('click', () => openAuthDialog());
 $('closeDialog').addEventListener('click', () => $('addAccountDialog').close()); $('addAccountForm').addEventListener('submit', event => { event.preventDefault(); startAuth(); }); $('guardSubmit').addEventListener('click', submitGuard);
 $('saveLoadout').addEventListener('click', saveLoadout); $('savePersonalize').addEventListener('click', savePersonalize);

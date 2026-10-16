@@ -277,7 +277,11 @@ dialog { width: min(510px, calc(100% - 28px)); padding: 0; border: 1px solid var
 .authenticator-identity time { color: #667176; font-size: 9px; }
 .authenticator-code { display: grid; gap: 4px; }
 .authenticator-code code { color: #edbf5e; font: 700 20px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .16em; }
-.authenticator-code small { color: #788389; font-size: 9px; }
+.authenticator-code-meta { display: flex; justify-content: space-between; gap: 10px; color: #788389; font-size: 9px; }
+.authenticator-code-meta small { color: inherit; font-size: inherit; }
+.authenticator-code-meta span { color: #5e686d; }
+.authenticator-progress { height: 3px; overflow: hidden; border-radius: 999px; background: #252a2d; }
+.authenticator-progress span { display: block; width: 0; height: 100%; border-radius: inherit; background: var(--blue); transition: width .25s linear; }
 .authenticator-actions { display: flex; gap: 6px; justify-content: flex-end; }
 .authenticator-actions button { padding: 7px 9px; font-size: 10px; }
 .authenticator-empty { display: grid; place-items: center; min-height: 180px; padding: 30px; color: #788389; text-align: center; }
