@@ -541,3 +541,11 @@ dialog { border-radius: 15px; background: #12243b; box-shadow: 0 30px 80px rgba(
 .mail-list-empty { min-height: 220px; flex: 1 1 auto; }
 @media (max-width: 1120px) { .mail-layout { height: auto; } .mail-list-panel { height: 500px; } .mail-detail-panel { height: 500px; } }
 @media (max-width: 620px) { .mail-list-panel { height: 420px; } .mail-detail-panel { height: 420px; } }
+
+/* Cross-browser interaction plane: keep the depth visual, keep hit-testing 2D. */
+.app-shell { perspective: none; }
+.sidebar, .main, .metric, .panel, .attention-row, .control-signal, .account-row { transform-style: flat; }
+.sidebar, .main, .metric, .panel, .attention-row, .control-signal, .account-row { transform: none; }
+.metric:hover { transform: translateY(-3px); }
+.attention-row:hover, .control-signal:hover, .account-row:hover { transform: translateY(-2px); }
+.mail-view, .mail-view .mail-list-panel, .mail-view .mail-detail-panel { transform: none !important; transform-style: flat !important; }
