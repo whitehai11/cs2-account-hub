@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -232,7 +233,7 @@ internal sealed class SteamAuthenticatorCodeService
                         using var response = await HttpClient.PostAsync("https://api.steampowered.com/ITwoFactorService/QueryTime/v0001/", content, cancellationToken);
                         response.EnsureSuccessStatusCode();
                         using var document = JsonDocument.Parse(await response.Content.ReadAsStreamAsync(cancellationToken));
-                        var serverTime = document.RootElement.GetProperty("response").GetProperty("server_time").GetInt64();
+                        var serverTime = ReadSteamServerTime(document.RootElement.GetProperty("response").GetProperty("server_time"));
                         _timeOffsetSeconds = serverTime - DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                         _lastTimeSyncUtc = DateTimeOffset.UtcNow;
                     }
@@ -250,6 +251,22 @@ internal sealed class SteamAuthenticatorCodeService
         }
 
         return DateTimeOffset.UtcNow.ToUnixTimeSeconds() + Interlocked.Read(ref _timeOffsetSeconds);
+    }
+
+    private static long ReadSteamServerTime(JsonElement serverTime)
+    {
+        if (serverTime.ValueKind == JsonValueKind.Number && serverTime.TryGetInt64(out var numericValue))
+        {
+            return numericValue;
+        }
+
+        if (serverTime.ValueKind == JsonValueKind.String &&
+            long.TryParse(serverTime.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var stringValue))
+        {
+            return stringValue;
+        }
+
+        throw new JsonException("Steam server_time has an invalid format.");
     }
 
     // Steam Desktop Authenticator / SteamAuth algorithm, adapted from the MIT-licensed

@@ -19,6 +19,8 @@ test('MAFile secrets are encrypted at rest and never exposed by the list DTO', (
 test('MAFile codes use a protected endpoint and account-name autofill', () => {
   expect(storeSource).toContain('HMACSHA1');
   expect(storeSource).toContain('ITwoFactorService/QueryTime/v0001/');
+  expect(storeSource).toContain('JsonValueKind.String');
+  expect(storeSource).toContain('long.TryParse');
   expect(backendSource).toContain('app.MapPost("/api/authenticators/{id:guid}/code"');
   expect(backendSource).toContain('TryGenerateCodeForAccountAsync(session.AccountName');
   expect(backendSource).toContain('SteamGuardType.DeviceCode');
