@@ -38,15 +38,17 @@ builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-            _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 180,
-                Window = TimeSpan.FromMinutes(1),
-                QueueLimit = 0,
-                AutoReplenishment = true,
-            }));
+        context.Request.Path.StartsWithSegments("/api/operations")
+            ? RateLimitPartition.GetNoLimiter("operation-status")
+            : RateLimitPartition.GetFixedWindowLimiter(
+                context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 180,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                    AutoReplenishment = true,
+                }));
     options.AddPolicy("web-login", context => RateLimitPartition.GetFixedWindowLimiter(
         context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
         _ => new FixedWindowRateLimiterOptions
@@ -62,6 +64,15 @@ builder.Services.AddRateLimiter(options =>
         {
             PermitLimit = 6,
             Window = TimeSpan.FromMinutes(5),
+            QueueLimit = 0,
+            AutoReplenishment = true,
+        }));
+    options.AddPolicy("operation-status", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 900,
+            Window = TimeSpan.FromMinutes(1),
             QueueLimit = 0,
             AutoReplenishment = true,
         }));
@@ -325,7 +336,7 @@ app.MapGet("/api/operations/{id:guid}", (Guid id, OperationStore operations) =>
 {
     var operation = operations.Get(id);
     return operation is null ? Results.NotFound() : Results.Ok(OperationMappings.ToDto(operation));
-});
+}).RequireRateLimiting("operation-status");
 
 app.MapPost("/api/accounts/{id:guid}/commands", async (
     Guid id,
