@@ -518,7 +518,7 @@ dialog { border-radius: 15px; background: #12243b; box-shadow: 0 30px 80px rgba(
 
 /* Mail workspace: keep scrolling and pointer events inside the message surfaces. */
 .mail-view { min-width: 0; min-height: 0; }
-.mail-view { position: relative; z-index: 1; isolation: isolate; }
+.mail-view { position: relative; z-index: 1; isolation: isolate; transform: none; transform-style: flat; }
 .mail-toolbar, .mail-actions { position: relative; z-index: 4; }
 .mail-view .mail-toolbar, .mail-view .mail-notice, .mail-view .mail-layout { position: relative; z-index: 2; }
 .mail-layout { min-width: 0; min-height: 0; height: min(680px, calc(100vh - 290px)); align-items: stretch; }
@@ -530,6 +530,7 @@ dialog { border-radius: 15px; background: #12243b; box-shadow: 0 30px 80px rgba(
 .mail-group { flex: 1 1 0; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1px solid transparent; border-radius: 7px; color: var(--muted); background: transparent; font-size: 11px; text-align: left; }
 .mail-view .mail-actions, .mail-view .mail-actions *, .mail-view .mail-groups, .mail-view .mail-groups *, .mail-view .mail-list, .mail-view .mail-list *, .mail-view .mail-detail, .mail-view .mail-detail * { pointer-events: auto; }
 .mail-view .mail-actions > *, .mail-view .mail-group, .mail-view .mail-row, .mail-view .mail-detail { position: relative; z-index: 5; }
+.mail-view .mail-actions button:hover, .mail-view .mail-actions button:active, .mail-view .mail-group:hover, .mail-view .mail-group:active, .mail-view .mail-row:hover, .mail-view .mail-row:active { transform: none; }
 .mail-group:hover { color: var(--text); background: rgba(45,82,123,.25); }
 .mail-group.active { border-color: #3f71a6; color: #f0f6fd; background: #17304d; box-shadow: inset 0 1px rgba(255,255,255,.07); }
 .mail-group-count { min-width: 18px; padding: 2px 5px; border-radius: 999px; color: #a9cfff; background: rgba(75,156,255,.12); font-size: 10px; text-align: center; }
