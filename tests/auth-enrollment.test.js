@@ -21,3 +21,12 @@ test('exposes the Steam login name alongside the display name', () => {
   expect(backendSource).toContain('account.AccountName');
   expect(appSource).toContain('account.accountName');
 });
+
+test('refreshes credentials in place for an existing account', () => {
+  expect(contractsSource).toContain('Guid? ExistingAccountId = null');
+  expect(backendSource).toContain('request.ExistingAccountId');
+  expect(runSource).toContain('session.ExistingAccountId');
+  expect(runSource).toContain('The Steam login belongs to a different account.');
+  expect(appSource).toContain('refreshLoginButton');
+  expect(appSource).toContain('existingAccountId: state.authAccountId');
+});

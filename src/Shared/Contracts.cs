@@ -195,7 +195,7 @@ public sealed record PersonalizePresetDto(
     string? AvatarBase64,
     bool ClearAliasHistory);
 
-public sealed record StartAuthRequest(string AccountName, string Password);
+public sealed record StartAuthRequest(string AccountName, string Password, Guid? ExistingAccountId = null);
 
 public sealed record StartAuthResponse(
     Guid SessionId,

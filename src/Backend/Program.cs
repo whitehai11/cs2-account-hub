@@ -303,7 +303,12 @@ app.MapPost("/api/auth/sessions", async (
         return Results.BadRequest(new { message = "Account name and password are required and within the allowed length." });
     }
 
-    var session = await sessions.StartAsync(request.AccountName.Trim(), request.Password, gateway, accounts, cancellationToken);
+    if (request.ExistingAccountId is { } existingAccountId && accounts.Get(existingAccountId) is null)
+    {
+        return Results.NotFound(new { message = "The account to refresh no longer exists." });
+    }
+
+    var session = await sessions.StartAsync(request.AccountName.Trim(), request.Password, request.ExistingAccountId, gateway, accounts, cancellationToken);
     return Results.Ok(new StartAuthResponse(session.Id, session.State, session.SteamId, session.PromptMessage));
 }).RequireRateLimiting("steam-auth");
 
@@ -963,9 +968,9 @@ internal sealed class AuthSessionStore
         _logger = logger;
     }
 
-    public async Task<AuthSessionRecord> StartAsync(string accountName, string password, ISteamAccountGateway gateway, AccountStore accounts, CancellationToken cancellationToken)
+    public async Task<AuthSessionRecord> StartAsync(string accountName, string password, Guid? existingAccountId, ISteamAccountGateway gateway, AccountStore accounts, CancellationToken cancellationToken)
     {
-        var session = new AuthSessionRecord(Guid.NewGuid(), accountName, password);
+        var session = new AuthSessionRecord(Guid.NewGuid(), accountName, password, existingAccountId);
         lock (_gate) _sessions[session.Id] = session;
         _ = RunAsync(session, gateway, accounts);
         await Task.Yield();
@@ -1004,22 +1009,40 @@ internal sealed class AuthSessionStore
 
             _logger.LogInformation("Steam auth session {SessionId} credentials accepted after {ElapsedMs} ms.", session.Id, stopwatch.ElapsedMilliseconds);
             session.SteamId = result.SteamId;
-            var account = new AccountRecord
+            var account = session.ExistingAccountId is { } existingAccountId
+                ? accounts.Get(existingAccountId)
+                : new AccountRecord
+                {
+                    SteamId = result.SteamId,
+                    PersonaName = result.AccountName,
+                };
+
+            if (account is null)
             {
-                AccountName = result.AccountName,
-                SteamId = result.SteamId,
-                PersonaName = result.AccountName,
-                ProtectedRefreshToken = _tokens.Protect(result.RefreshToken),
-                LastLoginUtc = DateTimeOffset.UtcNow,
-                HealthStatus = "status-pending",
-                NextCheckUtc = DateTimeOffset.UtcNow.AddMinutes(10),
-            };
+                throw new InvalidOperationException("The account to refresh no longer exists.");
+            }
+
+            if (session.ExistingAccountId is not null && !string.Equals(account.SteamId, result.SteamId, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("The Steam login belongs to a different account.");
+            }
+
+            account.AccountName = result.AccountName;
+            account.ProtectedRefreshToken = _tokens.Protect(result.RefreshToken);
+            account.LastLoginUtc = DateTimeOffset.UtcNow;
+            account.HealthStatus = "status-pending";
+            account.LastCheckError = null;
+            account.NextCheckUtc = DateTimeOffset.UtcNow.AddMinutes(10);
 
             accounts.Upsert(account);
-            _events.Append(account.Id, "account", "Account verbunden", $"{account.PersonaName ?? account.SteamId} wurde serverseitig hinzugefügt.", "success");
+            var isRefresh = session.ExistingAccountId is not null;
+            _events.Append(account.Id, "account", isRefresh ? "Login aktualisiert" : "Account verbunden",
+                isRefresh ? $"{account.PersonaName ?? account.SteamId} wurde neu authentifiziert." : $"{account.PersonaName ?? account.SteamId} wurde serverseitig hinzugefügt.", "success");
 
             session.State = AuthState.Completed;
-            session.PromptMessage = "Account authenticated. Status check is running in the background.";
+            session.PromptMessage = isRefresh
+                ? "Login aktualisiert. Der Status wird im Hintergrund erneut geladen."
+                : "Account authenticated. Status check is running in the background.";
 
             await EnrichAccountAsync(session, account, result.RefreshToken, gateway, accounts);
         }
@@ -1137,15 +1160,17 @@ internal sealed class AuthSessionStore
 
 internal sealed class AuthSessionRecord
 {
-    public AuthSessionRecord(Guid id, string accountName, string password)
+    public AuthSessionRecord(Guid id, string accountName, string password, Guid? existingAccountId)
     {
         Id = id;
         AccountName = accountName;
+        ExistingAccountId = existingAccountId;
         _password = password;
     }
 
     public Guid Id { get; }
     public string AccountName { get; }
+    public Guid? ExistingAccountId { get; }
     public DateTimeOffset StartedUtc { get; } = DateTimeOffset.UtcNow;
     private string? _password;
     public string TakePassword() => Interlocked.Exchange(ref _password, null)

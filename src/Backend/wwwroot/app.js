@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const state = { view: 'control', accounts: [], allAccounts: [], selected: null, authSession: null, avatarBase64: null, loadout: null, timeline: [], focusMode: false, mail: { messages: [], groups: [], selected: null, configured: false, activeGroup: 'primary', requestId: 0 } };
+const state = { view: 'control', accounts: [], allAccounts: [], selected: null, authSession: null, authAccountId: null, avatarBase64: null, loadout: null, timeline: [], focusMode: false, mail: { messages: [], groups: [], selected: null, configured: false, activeGroup: 'primary', requestId: 0 } };
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -217,11 +217,12 @@ function renderDetails() {
       ${renderRatingTrend(account)}
       <div class="detail-lines"><div class="detail-line"><span>VAC</span><strong>${account.vacBanned === true ? 'Ja' : account.vacBanned === false ? 'Nein' : 'Unbekannt'}</strong></div><div class="detail-line"><span>Cooldown-Ende</span><strong>${formatDate(account.cooldownEndsUtc)}</strong></div>${account.nextCooldownSeconds ? `<div class="detail-line"><span>Nächster Cooldown</span><strong class="next-cooldown-value">${nextCooldownText(account)}</strong></div>` : ''}<div class="detail-line"><span>Nächster GC-Check</span><strong>${formatDate(account.nextCheckUtc)} <span class="muted">(${relativeTime(account.nextCheckUtc)})</span></strong></div><div class="detail-line"><span>Letzter Login</span><strong>${formatDate(account.lastLoginUtc)}</strong></div></div>
       <div class="note-row"><input id="noteInput" value="${esc(account.note || '')}" placeholder="Notiz..."><button id="saveNote">Speichern</button></div>
-      <div class="detail-actions"><button data-command="RefreshStatus">Status aktualisieren</button><button data-command="SyncLoadout">Loadout prüfen</button><button data-command="ClearWorkshop">Workshop leeren</button><button data-command="ApplyLoadout">Loadout anwenden</button><button data-command="Personalize">Personalize</button><button id="permaGreenButton" class="perma-action">${account.isPermaGreen ? 'Perma-Green entfernen' : 'Als Perma-Green markieren'}</button><button id="monitoringButton" class="monitoring-action">${account.monitoringPaused ? 'Checks fortsetzen' : 'Spielmodus aktivieren'}</button><button id="deleteAccountButton" class="danger-action">Account aus System löschen</button></div>
+      <div class="detail-actions"><button id="refreshLoginButton" class="primary-action">Login aktualisieren</button><button data-command="RefreshStatus">Status aktualisieren</button><button data-command="SyncLoadout">Loadout prüfen</button><button data-command="ClearWorkshop">Workshop leeren</button><button data-command="ApplyLoadout">Loadout anwenden</button><button data-command="Personalize">Personalize</button><button id="permaGreenButton" class="perma-action">${account.isPermaGreen ? 'Perma-Green entfernen' : 'Als Perma-Green markieren'}</button><button id="monitoringButton" class="monitoring-action">${account.monitoringPaused ? 'Checks fortsetzen' : 'Spielmodus aktivieren'}</button><button id="deleteAccountButton" class="danger-action">Account aus System löschen</button></div>
       ${renderRecentMatches(account)}
       <p id="operationMessage" class="muted"></p>
     </div>`;
   $('saveNote').addEventListener('click', saveNote);
+  $('refreshLoginButton').addEventListener('click', () => openAuthDialog(account));
   $('permaGreenButton').addEventListener('click', togglePermaGreen);
   $('monitoringButton').addEventListener('click', toggleMonitoring);
   $('deleteAccountButton').addEventListener('click', deleteSelectedAccount);
@@ -413,10 +414,27 @@ async function savePersonalize() {
   catch (error) { toast(error.message, true); }
 }
 
+function openAuthDialog(account = null) {
+  state.authAccountId = account?.id || null;
+  $('addAccountForm').reset();
+  $('steamUsername').value = account?.accountName || '';
+  $('authDialogKicker').textContent = account ? 'LOGIN REFRESH' : 'ACCOUNT ENROLLMENT';
+  $('authDialogTitle').textContent = account ? 'Steam-Login aktualisieren' : 'Steam-Account verbinden';
+  $('authDialogDescription').textContent = account
+    ? 'Der bestehende Account bleibt erhalten. Nur das Steam-Login und der Refresh-Token werden aktualisiert; danach wird der Status neu geladen.'
+    : 'Die Zugangsdaten werden nur für den serverseitigen Steam-Login verwendet. Steam Guard bleibt vollständig unter deiner Kontrolle.';
+  $('authProgress').classList.add('hidden');
+  $('guardLabel').classList.add('hidden');
+  $('guardSubmit').classList.add('hidden');
+  setAuthStage('Verbindung wird vorbereitet', 'Bitte einen Moment warten ...', 25);
+  setButtonBusy('steamSubmitButton', false, account ? 'Login aktualisieren' : 'Steam-Login starten');
+  $('addAccountDialog').showModal();
+}
+
 async function startAuth() {
   setButtonBusy('steamSubmitButton', true, 'Steam-Login läuft ...');
   $('authProgress').classList.remove('hidden'); setAuthStage('Steam-Verbindung wird aufgebaut', 'Die CM-Verbindung wird vorbereitet ...', 22);
-  try { const accountName = $('steamUsername').value, password = $('steamPassword').value; $('steamPassword').value = ''; const session = await api('/api/auth/sessions', { method: 'POST', body: JSON.stringify({ accountName, password }) }); state.authSession = session.sessionId; setAuthStage('Steam wartet auf Antwort', session.promptMessage || 'Authentifizierung läuft serverseitig ...', 46); pollAuth(); }
+  try { const accountName = $('steamUsername').value, password = $('steamPassword').value; $('steamPassword').value = ''; const session = await api('/api/auth/sessions', { method: 'POST', body: JSON.stringify({ accountName, password, existingAccountId: state.authAccountId }) }); state.authSession = session.sessionId; setAuthStage('Steam wartet auf Antwort', session.promptMessage || 'Authentifizierung läuft serverseitig ...', 46); pollAuth(); }
   catch (error) { setAuthStage('Login konnte nicht gestartet werden', error.message, 100); setButtonBusy('steamSubmitButton', false, 'Erneut versuchen'); toast(error.message, true); }
 }
 async function pollAuth() {
@@ -425,7 +443,7 @@ async function pollAuth() {
     const session = await api(`/api/auth/sessions/${state.authSession}`); $('authMessage').textContent = session.promptMessage || 'Steam-Authentifizierung läuft ...';
     const waiting = session.state === 0 || session.state === 1; $('guardLabel').classList.toggle('hidden', !waiting); $('guardSubmit').classList.toggle('hidden', !waiting);
     if (waiting) { setAuthStage(session.state === 1 ? 'Bestätigung erforderlich' : 'Steam Guard wird erwartet', session.promptMessage || 'Bitte den Code eingeben.', session.state === 1 ? 70 : 58); }
-    if (session.state === 2) { setAuthStage('Account erfolgreich verbunden', 'Status- und GC-Daten werden im Hintergrund geladen ...', 100); toast('Steam-Account hinzugefügt.'); setTimeout(() => { $('addAccountDialog').close(); state.authSession = null; setButtonBusy('steamSubmitButton', false, 'Steam-Login starten'); loadAccounts(); }, 700); return; }
+    if (session.state === 2) { const refreshing = !!state.authAccountId; setAuthStage(refreshing ? 'Login erfolgreich aktualisiert' : 'Account erfolgreich verbunden', refreshing ? 'Der bestehende Account bleibt erhalten. Status- und GC-Daten werden neu geladen ...' : 'Status- und GC-Daten werden im Hintergrund geladen ...', 100); toast(refreshing ? 'Steam-Login aktualisiert.' : 'Steam-Account hinzugefügt.'); setTimeout(() => { $('addAccountDialog').close(); state.authSession = null; state.authAccountId = null; setButtonBusy('steamSubmitButton', false, 'Steam-Login starten'); loadAccounts(); }, 700); return; }
     if (session.state === 3) { setAuthStage('Steam-Login fehlgeschlagen', session.promptMessage || 'Bitte die Zugangsdaten prüfen.', 100); setButtonBusy('steamSubmitButton', false, 'Erneut versuchen'); return; }
     setTimeout(pollAuth, 1200);
   } catch (error) { $('authMessage').textContent = error.message; }
@@ -445,7 +463,7 @@ $('mailUnread').addEventListener('change', loadMail); $('syncMailButton').addEve
 $('mailList').addEventListener('click', event => { const row = event.target.closest('[data-mail-id]'); if (row) selectMail(row.dataset.mailId); });
 document.querySelectorAll('[data-mail-group]').forEach(button => button.addEventListener('click', () => { if (state.mail.activeGroup === button.dataset.mailGroup) return; state.mail.activeGroup = button.dataset.mailGroup; state.mail.selected = null; loadMail(); }));
 $('logoutButton').addEventListener('click', async () => { await api('/api/web/logout', { method: 'POST' }); showLogin(); });
-$('addAccountButton').addEventListener('click', () => { $('addAccountForm').reset(); $('authProgress').classList.add('hidden'); $('guardLabel').classList.add('hidden'); $('guardSubmit').classList.add('hidden'); setAuthStage('Verbindung wird vorbereitet', 'Bitte einen Moment warten ...', 25); setButtonBusy('steamSubmitButton', false, 'Steam-Login starten'); $('addAccountDialog').showModal(); });
+$('addAccountButton').addEventListener('click', () => openAuthDialog());
 $('closeDialog').addEventListener('click', () => $('addAccountDialog').close()); $('addAccountForm').addEventListener('submit', event => { event.preventDefault(); startAuth(); }); $('guardSubmit').addEventListener('click', submitGuard);
 $('saveLoadout').addEventListener('click', saveLoadout); $('savePersonalize').addEventListener('click', savePersonalize);
 $('refreshTimelineButton').addEventListener('click', loadTimeline);
