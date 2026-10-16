@@ -28,6 +28,7 @@ builder.Services.AddSingleton<TokenProtector>();
 builder.Services.AddSingleton<SecretProtector>();
 builder.Services.AddSingleton<SteamAuthenticatorCodeService>();
 builder.Services.AddSingleton<SteamAuthenticatorStore>();
+builder.Services.AddSingleton<ExportBackupService>();
 builder.Services.AddSingleton<WebSessionService>();
 builder.Services.AddSingleton<SteamPublicProfileService>();
 builder.Services.AddSingleton<SteamBanService>();
@@ -255,6 +256,39 @@ app.MapGet("/api/timeline", (int? limit, Guid? accountId, string? type, AccountE
         })
         .ToArray();
     return Results.Ok(items);
+});
+
+app.MapGet("/api/analytics", (int? days, AccountEventStore events, AccountStore accounts) =>
+    Results.Ok(events.Analytics(accounts, days ?? 30)));
+
+app.MapGet("/api/export/accounts", (string? format, AccountStore accounts, AccountEventStore events) =>
+{
+    var bundle = ExportBackupService.BuildExport(accounts, events);
+    if (string.Equals(format, "csv", StringComparison.OrdinalIgnoreCase))
+    {
+        var csv = ExportBackupService.ToCsv(bundle);
+        return Results.File(Encoding.UTF8.GetBytes(csv), "text/csv; charset=utf-8", $"cs2-account-hub-export-{DateTime.UtcNow:yyyyMMdd-HHmm}.csv");
+    }
+
+    return Results.Ok(bundle);
+});
+
+app.MapPost("/api/backup", (BackupRequest request, ExportBackupService exporter) =>
+{
+    if (request is null || string.IsNullOrWhiteSpace(request.Passphrase) || request.Passphrase.Length is < 12 or > 256)
+    {
+        return Results.BadRequest(new { message = "Das Backup-Passwort muss zwischen 12 und 256 Zeichen lang sein." });
+    }
+
+    try
+    {
+        var backup = exporter.CreateEncryptedBackup(request.Passphrase);
+        return Results.File(backup, "application/octet-stream", $"cs2-account-hub-backup-{DateTime.UtcNow:yyyyMMdd-HHmm}.cs2backup");
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { message = exception.Message });
+    }
 });
 
 app.MapGet("/api/mail", (string? query, bool? unread, string? group, int? limit, SteamMailStore mail) =>

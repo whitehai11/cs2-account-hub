@@ -17,8 +17,8 @@ Move the existing account timeline into its own sidebar area and extend the hub 
 
 ### Phase 1: History foundation and navigation
 
-- [ ] Task 1: Move Account-Timeline into a dedicated sidebar view and remove it from Personalize.
-- [ ] Task 2: Record and expose meaningful ban/status transitions in the existing event store.
+- [x] Task 1: Move Account-Timeline into a dedicated sidebar view and remove it from Personalize.
+- [x] Task 2: Record and expose meaningful ban/status transitions in the existing event store.
 
 ### Checkpoint: History
 
@@ -28,8 +28,8 @@ Move the existing account timeline into its own sidebar area and extend the hub 
 
 ### Phase 2: Fleet operations
 
-- [ ] Task 3: Add multi-select account rows and a bulk-action toolbar.
-- [ ] Task 4: Add a batch-command API that queues one safe operation per selected account.
+- [x] Task 3: Add multi-select account rows and a bulk-action toolbar.
+- [x] Task 4: Add a batch-command API that queues one safe operation per selected account.
 
 ### Checkpoint: Bulk actions
 
@@ -38,13 +38,13 @@ Move the existing account timeline into its own sidebar area and extend the hub 
 
 ### Phase 3: Alerts and analytics
 
-- [ ] Task 5: Add transition-based Smart Alerts for bans, login state, GC state, and cooldown changes.
-- [ ] Task 6: Add bounded dashboard analytics and charts backed by persisted history.
+- [x] Task 5: Add transition-based Smart Alerts for bans, login state, GC state, and cooldown changes.
+- [x] Task 6: Add bounded dashboard analytics and charts backed by persisted history.
 
 ### Phase 4: Export and backup
 
-- [ ] Task 7: Add redacted CSV/JSON export for accounts and history.
-- [ ] Task 8: Add an explicitly protected server backup flow with clear key-handling warnings.
+- [x] Task 7: Add redacted CSV/JSON export for accounts and history.
+- [x] Task 8: Add an explicitly protected server backup flow with clear key-handling warnings.
 
 ### Checkpoint: Complete
 

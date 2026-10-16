@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const state = { view: 'control', accounts: [], allAccounts: [], selected: null, selectedIds: new Set(), authSession: null, authAccountId: null, avatarBase64: null, loadout: null, timeline: [], focusMode: false, authenticators: [], authenticatorTimers: {}, mail: { messages: [], groups: [], selected: null, configured: false, activeGroup: 'primary', requestId: 0 } };
+const state = { view: 'control', accounts: [], allAccounts: [], selected: null, selectedIds: new Set(), authSession: null, authAccountId: null, avatarBase64: null, loadout: null, timeline: [], analytics: null, focusMode: false, authenticators: [], authenticatorTimers: {}, mail: { messages: [], groups: [], selected: null, configured: false, activeGroup: 'primary', requestId: 0 } };
 
 async function api(path, options = {}) {
   const isMultipart = options.body instanceof FormData;
@@ -166,27 +166,29 @@ function setView(view) {
   const mail = view === 'mail';
   const authenticator = view === 'authenticator';
   const timeline = view === 'timeline';
+  const exportView = view === 'export';
   const control = view === 'control';
-  $('accountsView').classList.toggle('hidden', settings || control || mail || authenticator || timeline);
+  $('accountsView').classList.toggle('hidden', settings || control || mail || authenticator || timeline || exportView);
   $('settingsView').classList.toggle('hidden', !settings);
   $('controlView').classList.toggle('hidden', !control);
   $('mailView').classList.toggle('hidden', !mail);
   $('authenticatorView').classList.toggle('hidden', !authenticator);
   $('timelineView').classList.toggle('hidden', !timeline);
-  $('overview').classList.toggle('hidden', settings || mail || authenticator || timeline);
-  $('signalBar').classList.toggle('hidden', settings || mail || authenticator || timeline);
+  $('exportView').classList.toggle('hidden', !exportView);
+  $('overview').classList.toggle('hidden', settings || mail || authenticator || timeline || exportView);
+  $('signalBar').classList.toggle('hidden', settings || mail || authenticator || timeline || exportView);
   $('loadoutSettings').classList.toggle('hidden', view !== 'loadout');
   $('personalizeSettings').classList.toggle('hidden', view !== 'personalize');
-  const titles = { control: ['Mission Control', 'Alle Accounts. Alle Signale. Ein klarer nächster Schritt.'], play: ['Play Ready', 'Accounts ohne aktiven Cooldown oder VAC'], notplay: ['Not Play Ready', 'Accounts mit Cooldown oder unbekanntem Status'], vac: ['VAC-Ban', 'Accounts mit erkanntem VAC-Ban'], mail: ['Steam Mail', 'Globaler Steam-Posteingang ohne Account-Zuordnung'], authenticator: ['Steam Authenticator', 'MAFile-gestützte Steam-Guard-Codes mit Account-Abgleich'], timeline: ['Timeline', 'Die Historie deiner Account-Flotte'], loadout: ['Loadout', 'Serverseitige Presets und Synchronisierung'], personalize: ['Personalize', 'Profil-Presets und Account-Profil'] };
+  const titles = { control: ['Mission Control', 'Alle Accounts. Alle Signale. Ein klarer nächster Schritt.'], play: ['Play Ready', 'Accounts ohne aktiven Cooldown oder VAC'], notplay: ['Not Play Ready', 'Accounts mit Cooldown oder unbekanntem Status'], vac: ['VAC-Ban', 'Accounts mit erkanntem VAC-Ban'], mail: ['Steam Mail', 'Globaler Steam-Posteingang ohne Account-Zuordnung'], authenticator: ['Steam Authenticator', 'MAFile-gestützte Steam-Guard-Codes mit Account-Abgleich'], timeline: ['Timeline', 'Die Historie deiner Account-Flotte'], export: ['Export & Backup', 'Daten mitnehmen. Secrets geschützt sichern.'], loadout: ['Loadout', 'Serverseitige Presets und Synchronisierung'], personalize: ['Personalize', 'Profil-Presets und Account-Profil'] };
   $('pageTitle').textContent = titles[view][0]; $('pageSubtitle').textContent = titles[view][1];
-  const animatedView = control ? $('controlView') : mail ? $('mailView') : authenticator ? $('authenticatorView') : timeline ? $('timelineView') : settings ? $('settingsView') : $('accountsView'); animatedView.classList.remove('view-enter'); requestAnimationFrame(() => animatedView.classList.add('view-enter'));
-  if (control) loadControl(); else if (mail) loadMail(); else if (authenticator) loadAuthenticators(); else if (timeline) loadTimeline(); else if (settings) loadSettings(); else loadAccounts();
+  const animatedView = control ? $('controlView') : mail ? $('mailView') : authenticator ? $('authenticatorView') : timeline ? $('timelineView') : exportView ? $('exportView') : settings ? $('settingsView') : $('accountsView'); animatedView.classList.remove('view-enter'); requestAnimationFrame(() => animatedView.classList.add('view-enter'));
+  if (control) loadControl(); else if (mail) loadMail(); else if (authenticator) loadAuthenticators(); else if (timeline) loadTimeline(); else if (exportView) { /* downloads are explicit actions */ } else if (settings) loadSettings(); else loadAccounts();
 }
 
 async function loadControl() {
   try {
-    const [all, timeline] = await Promise.all([api('/api/accounts'), api('/api/timeline?limit=12')]);
-    state.allAccounts = all; state.timeline = timeline; renderControl(); await loadOverview(all);
+    const [all, timeline, analytics] = await Promise.all([api('/api/accounts'), api('/api/timeline?limit=12'), api('/api/analytics?days=30')]);
+    state.allAccounts = all; state.timeline = timeline; state.analytics = analytics; renderControl(); renderAnalytics(); await loadOverview(all);
   } catch (error) { toast(error.message, true); }
 }
 
@@ -198,6 +200,31 @@ function renderControl() {
   $('attentionList').innerHTML = visible.length ? visible.map(account => { const item = accountAttention(account); return `<button class="attention-row ${item[0]}" data-account-id="${account.id}"><span class="attention-icon">${item[0] === 'critical' ? '!' : item[0] === 'warning' ? '◷' : '·'}</span><span class="attention-main"><strong>${esc(account.personaName || account.steamId)}</strong><small>${esc(item[1])} · ${esc(item[2])}</small></span><span class="attention-arrow">→</span></button>`; }).join('') : '<div class="control-empty"><strong>Fleet ist ruhig</strong><span>Aktuell braucht kein Account deine Aufmerksamkeit.</span></div>';
   $('controlSignals').innerHTML = state.timeline.length ? state.timeline.slice(0, 8).map(item => `<button class="control-signal ${esc(item.severity || 'info')}" data-account-id="${item.accountId}"><span class="timeline-icon">${timelineIcon(item.type)}</span><span><strong>${esc(signalTitle(item))}</strong><small>${esc(item.personaName || item.steamId)} · ${esc(relativeTime(item.occurredUtc))}</small></span><span class="control-signal-arrow">→</span></button>`).join('') : '<div class="control-empty"><strong>Noch keine Signale</strong><span>Scheduler-Checks und Aktionen erscheinen hier.</span></div>';
   document.querySelectorAll('[data-account-id]').forEach(button => button.addEventListener('click', () => { const account = state.allAccounts.find(item => item.id === button.dataset.accountId); setView(account && sectionName(account.section) === 'VacBanned' ? 'vac' : account && sectionName(account.section) === 'NotPlayReady' ? 'notplay' : 'play'); selectAccount(button.dataset.accountId); }));
+}
+
+function renderAnalytics() {
+  const analytics = state.analytics;
+  if (!analytics) return;
+  $('analyticsSummary').innerHTML = [
+    ['totalAccounts', 'Accounts', 'neutral'],
+    ['playReadyAccounts', 'Play Ready', 'ready'],
+    ['notPlayReadyAccounts', 'Not Play Ready', 'warning'],
+    ['vacBannedAccounts', 'VAC-Ban', 'danger'],
+  ].map(([key, label, tone]) => `<div class="analytics-stat ${tone}"><small>${label}</small><strong>${analytics[key] ?? 0}</strong></div>`).join('');
+  const points = analytics.points || [];
+  const max = Math.max(1, ...points.map(point => point.statusEvents + point.banEvents + point.cooldownEvents + point.actionEvents + point.errorEvents));
+  $('analyticsChart').innerHTML = points.length ? points.map(point => {
+    const total = point.statusEvents + point.banEvents + point.cooldownEvents + point.actionEvents + point.errorEvents;
+    const label = new Date(point.dateUtc).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });
+    const bars = [
+      ['status', point.statusEvents],
+      ['ban', point.banEvents],
+      ['cooldown', point.cooldownEvents],
+      ['action', point.actionEvents],
+      ['error', point.errorEvents],
+    ].map(([tone, value]) => value ? `<span class="analytics-bar ${tone}" style="height:${Math.max(5, (value / max) * 100)}%" title="${esc(`${label}: ${value} ${tone}`)}"></span>` : '').join('');
+    return `<div class="analytics-day" title="${esc(`${label}: ${total} Ereignisse`)}"><div class="analytics-stack">${bars || '<span class="analytics-bar empty"></span>'}</div><small>${esc(label)}</small></div>`;
+  }).join('') : '<div class="analytics-empty">Noch keine Ereignisse für diesen Zeitraum.</div>';
 }
 
 async function loadAccounts() {
@@ -276,7 +303,10 @@ async function runBulkCommand() {
       for (let attempt = 0; attempt < 180 && current.state < 2; attempt++) {
         await new Promise(resolve => setTimeout(resolve, 700));
         current = await api(`/api/operations/${operation.id}`);
-        $('bulkProgress').textContent = `${++completed}/${operations.length} abgeschlossen`;
+        if (current.state >= 2) {
+          completed++;
+          $('bulkProgress').textContent = `${completed}/${operations.length} abgeschlossen`;
+        }
       }
       return current;
     }));
@@ -624,12 +654,27 @@ async function checkSession() { try { const me = await api('/api/web/me'); showA
 
 $('loginForm').addEventListener('submit', async event => { event.preventDefault(); setButtonBusy('dashboardLoginButton', true, 'Anmeldung läuft ...'); $('loginError').textContent = ''; try { const me = await api('/api/web/login', { method: 'POST', body: JSON.stringify({ username: $('loginUsername').value, password: $('loginPassword').value }) }); $('loginPassword').value = ''; showApp(me.username); await loadSettings(); await loadControl(); } catch (error) { $('loginError').textContent = error.message; setButtonBusy('dashboardLoginButton', false, 'Dashboard öffnen'); } });
 document.querySelectorAll('.nav-item').forEach(item => item.addEventListener('click', () => setView(item.dataset.view)));
-$('refreshButton').addEventListener('click', () => state.view === 'play' || state.view === 'notplay' || state.view === 'vac' ? loadAccounts() : state.view === 'control' ? loadControl() : state.view === 'mail' ? loadMail() : state.view === 'authenticator' ? loadAuthenticators() : state.view === 'timeline' ? loadTimeline() : loadSettings());
+$('refreshButton').addEventListener('click', () => state.view === 'play' || state.view === 'notplay' || state.view === 'vac' ? loadAccounts() : state.view === 'control' ? loadControl() : state.view === 'mail' ? loadMail() : state.view === 'authenticator' ? loadAuthenticators() : state.view === 'timeline' ? loadTimeline() : state.view === 'export' ? null : loadSettings());
 $('primeFilter').addEventListener('change', loadAccounts); $('accountSearch').addEventListener('input', renderAccounts);
 $('bulkRunButton').addEventListener('click', runBulkCommand); $('clearSelectionButton').addEventListener('click', () => { state.selectedIds.clear(); renderAccounts(); });
 $('focusButton').addEventListener('click', () => { state.focusMode = !state.focusMode; renderControl(); });
 $('refreshAllButton').addEventListener('click', loadControl);
 $('openTimelineButton').addEventListener('click', () => setView('timeline'));
+function downloadExport(format) { window.location.href = `/api/export/accounts?format=${format}`; }
+async function createBackup() {
+  const passphrase = $('backupPassphrase').value;
+  if (passphrase.length < 12) { toast('Das Backup-Passwort muss mindestens 12 Zeichen lang sein.', true); return; }
+  setButtonBusy('backupButton', true, 'Backup wird verschlüsselt ...');
+  try {
+    const response = await fetch('/api/backup', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ passphrase }) });
+    if (!response.ok) { let message = `HTTP ${response.status}`; try { message = (await response.json()).message || message; } catch {} throw new Error(message); }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `cs2-account-hub-backup-${new Date().toISOString().slice(0, 10)}.cs2backup`; link.click(); URL.revokeObjectURL(url);
+    $('backupPassphrase').value = ''; toast('Verschlüsseltes Backup heruntergeladen.');
+  } catch (error) { toast(error.message, true); }
+  finally { setButtonBusy('backupButton', false, 'Backup herunterladen'); }
+}
+$('exportJsonButton').addEventListener('click', () => downloadExport('json')); $('exportCsvButton').addEventListener('click', () => downloadExport('csv')); $('backupButton').addEventListener('click', createBackup);
 $('mailSearch').addEventListener('input', () => { clearTimeout(state.mail.searchTimer); state.mail.searchTimer = setTimeout(loadMail, 250); });
 $('mailUnread').addEventListener('change', loadMail); $('syncMailButton').addEventListener('click', syncMail);
 $('mailList').addEventListener('click', event => { const row = event.target.closest('[data-mail-id]'); if (row) selectMail(row.dataset.mailId); });

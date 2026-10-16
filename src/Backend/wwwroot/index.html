@@ -33,6 +33,7 @@
         <button class="nav-item" data-view="mail"><span class="nav-icon nav-icon-mail"></span><span>Steam Mail</span><span id="mailUnreadBadge" class="nav-count hidden">0</span></button>
         <button class="nav-item" data-view="authenticator"><span class="nav-icon nav-icon-authenticator"></span><span>Steam Authenticator</span></button>
         <button class="nav-item" data-view="timeline"><span class="nav-icon nav-icon-timeline"></span><span>Timeline</span></button>
+        <button class="nav-item" data-view="export"><span class="nav-icon nav-icon-export"></span><span>Export &amp; Backup</span></button>
         <button class="nav-item" data-view="loadout"><span class="nav-icon nav-icon-loadout"></span><span>Loadout</span></button>
         <button class="nav-item" data-view="personalize"><span class="nav-icon nav-icon-profile"></span><span>Personalize</span></button>
       </nav>
@@ -51,6 +52,7 @@
       <section id="controlView" class="control-view">
         <div class="control-hero"><div><h3>Was braucht gerade Aufmerksamkeit?</h3><p class="muted">Status, Warnungen und Aktionen auf einer Fläche.</p></div><div class="control-actions"><button id="focusButton" class="secondary">Nur Aufmerksamkeit</button><button id="refreshAllButton" class="primary">Fleet prüfen</button></div></div>
         <div class="control-grid"><section class="panel attention-panel"><div class="panel-head"><div><h3>Attention Queue</h3><p class="muted">Sortiert nach Dringlichkeit</p></div><span id="attentionCount" class="panel-count">—</span></div><div id="attentionList" class="attention-list"></div></section><section class="panel signals-panel"><div class="panel-head"><div><h3>Live Signals</h3><p class="muted">Die letzten Änderungen im Hub</p></div><button id="openTimelineButton" class="text-button">Alle öffnen</button></div><div id="controlSignals" class="control-signals"></div></section></div>
+        <section class="panel analytics-panel"><div class="panel-head"><div><span class="eyebrow">FLEET TELEMETRY</span><h3>Fleet Analytics</h3><p class="muted">Status- und Ereignisverlauf der letzten 30 Tage.</p></div><span class="panel-count">30 Tage</span></div><div id="analyticsSummary" class="analytics-summary"></div><div id="analyticsChart" class="analytics-chart" aria-label="Fleet Analytics"></div></section>
       </section>
 
       <section id="accountsView" class="content-grid hidden">
@@ -74,6 +76,14 @@
       <section id="timelineView" class="timeline-view hidden">
         <div class="timeline-toolbar"><div><span class="eyebrow">EVENT HISTORY</span><h3>Account-Timeline</h3><p class="muted">Alle wichtigen CM-/GC-Ereignisse deiner Accounts an einem Ort.</p></div><button id="refreshTimelineButton" class="secondary" type="button">Timeline aktualisieren</button></div>
         <section class="panel timeline-panel"><div id="timelineSummary" class="timeline-summary"></div><div id="timelineList" class="timeline-list"></div></section>
+      </section>
+
+      <section id="exportView" class="export-view hidden">
+        <div class="export-hero"><div><span class="eyebrow">DATA CONTROL</span><h3>Export &amp; Backup</h3><p class="muted">Nimm deine Account-Übersicht mit oder sichere den kompletten verschlüsselten Hub-Zustand.</p></div></div>
+        <div class="export-grid">
+          <section class="panel export-card"><div class="panel-head"><div><h3>Safe Export</h3><p class="muted">Nur Statusdaten und Timeline. Keine Tokens, Passwörter oder MAFile-Secrets.</p></div></div><div class="export-actions"><button id="exportJsonButton" class="primary" type="button">JSON exportieren</button><button id="exportCsvButton" class="secondary" type="button">CSV exportieren</button></div></section>
+          <section class="panel export-card"><div class="panel-head"><div><h3>Verschlüsseltes Backup</h3><p class="muted">Enthält Accounts, Mails, Authenticatoren und den Data-Protection-Keyring.</p></div></div><label class="backup-passphrase">Backup-Passwort<input id="backupPassphrase" type="password" minlength="12" maxlength="256" autocomplete="new-password" placeholder="Mindestens 12 Zeichen"></label><p class="export-warning">Ohne dieses Passwort und den Keyring können geschützte Sessions und Authenticator-Secrets nicht wiederhergestellt werden.</p><button id="backupButton" class="primary" type="button"><span class="button-spinner hidden"></span><span class="button-text">Backup herunterladen</span></button></section>
+        </div>
       </section>
 
       <section id="settingsView" class="settings-panel panel hidden">

@@ -178,6 +178,44 @@ public sealed record AccountTimelineEventDto(
     string Severity,
     DateTimeOffset OccurredUtc);
 
+public sealed record AccountAnalyticsPointDto(
+    DateTimeOffset DateUtc,
+    int StatusEvents,
+    int BanEvents,
+    int CooldownEvents,
+    int ActionEvents,
+    int ErrorEvents);
+
+public sealed record AccountAnalyticsDto(
+    int TotalAccounts,
+    int PlayReadyAccounts,
+    int NotPlayReadyAccounts,
+    int VacBannedAccounts,
+    IReadOnlyList<AccountAnalyticsPointDto> Points);
+
+public sealed record SafeAccountExportDto(
+    Guid Id,
+    string? AccountName,
+    string SteamId,
+    string? PersonaName,
+    AccountPrimeBucket Prime,
+    AccountSection Section,
+    bool? Cs2Owned,
+    bool? VacBanned,
+    bool? SteamGameBanned,
+    bool? SteamVacBanned,
+    string? HealthStatus,
+    bool LoginRequiresReauthentication,
+    DateTimeOffset? LastLoginUtc,
+    DateTimeOffset? StatusUpdatedUtc);
+
+public sealed record AccountExportBundleDto(
+    DateTimeOffset GeneratedUtc,
+    IReadOnlyList<SafeAccountExportDto> Accounts,
+    IReadOnlyList<AccountTimelineEventDto> Events);
+
+public sealed record BackupRequest(string Passphrase);
+
 public sealed record SteamMailMessageDto(
     Guid Id,
     string Subject,

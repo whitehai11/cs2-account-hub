@@ -64,6 +64,61 @@ internal sealed class AccountEventStore
         }
     }
 
+    public IReadOnlyList<AccountEventRecord> ListAll()
+    {
+        lock (_gate)
+        {
+            return _events.OrderByDescending(item => item.OccurredUtc).ToArray();
+        }
+    }
+
+    public AccountAnalyticsDto Analytics(AccountStore accounts, int days)
+    {
+        var boundedDays = Math.Clamp(days, 7, 90);
+        var start = DateTime.UtcNow.Date.AddDays(-(boundedDays - 1));
+        Dictionary<DateTime, int[]> counts;
+
+        lock (_gate)
+        {
+            counts = _events
+                .Where(item => item.OccurredUtc.UtcDateTime.Date >= start)
+                .GroupBy(item => item.OccurredUtc.UtcDateTime.Date)
+                .ToDictionary(
+                    group => group.Key,
+                    group => new[]
+                    {
+                        group.Count(item => string.Equals(item.Type, "status", StringComparison.OrdinalIgnoreCase)),
+                        group.Count(item => string.Equals(item.Type, "ban", StringComparison.OrdinalIgnoreCase)),
+                        group.Count(item => string.Equals(item.Type, "cooldown", StringComparison.OrdinalIgnoreCase)),
+                        group.Count(item => string.Equals(item.Type, "action", StringComparison.OrdinalIgnoreCase) || string.Equals(item.Type, "matches", StringComparison.OrdinalIgnoreCase)),
+                        group.Count(item => string.Equals(item.Type, "error", StringComparison.OrdinalIgnoreCase)),
+                    });
+        }
+
+        var points = Enumerable.Range(0, boundedDays)
+            .Select(offset =>
+            {
+                var date = start.AddDays(offset);
+                var values = counts.GetValueOrDefault(date) ?? new int[5];
+                return new AccountAnalyticsPointDto(
+                    new DateTimeOffset(date, TimeSpan.Zero),
+                    values[0],
+                    values[1],
+                    values[2],
+                    values[3],
+                    values[4]);
+            })
+            .ToArray();
+
+        var snapshot = accounts.List(null, null);
+        return new AccountAnalyticsDto(
+            snapshot.Count,
+            snapshot.Count(account => account.Section == AccountSection.PlayReady),
+            snapshot.Count(account => account.Section == AccountSection.NotPlayReady),
+            snapshot.Count(account => account.Section == AccountSection.VacBanned),
+            points);
+    }
+
     public void RemoveForAccount(Guid accountId)
     {
         lock (_gate)
