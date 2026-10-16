@@ -10,4 +10,5 @@
 - [x] Task 6: Add bounded dashboard analytics and charts.
 - [x] Task 7: Add redacted CSV/JSON export.
 - [x] Task 8: Add protected server backup flow.
+- [x] Task 9: Add a bounded semi-automatic enrollment assistant.
 - [ ] Checkpoint: Complete verification and production deploy.

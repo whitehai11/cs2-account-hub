@@ -46,12 +46,17 @@ Move the existing account timeline into its own sidebar area and extend the hub 
 - [x] Task 7: Add redacted CSV/JSON export for accounts and history.
 - [x] Task 8: Add an explicitly protected server backup flow with clear key-handling warnings.
 
+### Phase 5: Semi-automatic enrollment
+
+- [x] Task 9: Add a bounded two-per-day manual Steam enrollment assistant without signup automation.
+
 ### Checkpoint: Complete
 
 - [ ] Full test suite passes.
 - [ ] Docker production build and health check pass.
 - [ ] Browser smoke test covers navigation, selection, bulk action feedback, charts, and export.
 - [ ] No credentials, refresh tokens, MAFile secrets, or Data Protection keys appear in exports.
+- [ ] Enrollment quota, official signup link, and handoff to the existing login flow are verified.
 
 ## Risks and Mitigations
 

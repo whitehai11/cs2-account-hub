@@ -216,6 +216,21 @@ public sealed record AccountExportBundleDto(
 
 public sealed record BackupRequest(string Passphrase);
 
+public sealed record EnrollmentStartRequest(string? Domain = null);
+
+public sealed record EnrollmentStatusDto(
+    DateTimeOffset DayUtc,
+    int Limit,
+    int Used,
+    int Remaining);
+
+public sealed record EnrollmentSessionDto(
+    Guid Id,
+    string SignupUrl,
+    string? Domain,
+    DateTimeOffset StartedUtc,
+    EnrollmentStatusDto Quota);
+
 public sealed record SteamMailMessageDto(
     Guid Id,
     string Subject,

@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const state = { view: 'control', accounts: [], allAccounts: [], selected: null, selectedIds: new Set(), authSession: null, authAccountId: null, avatarBase64: null, loadout: null, timeline: [], analytics: null, focusMode: false, authenticators: [], authenticatorTimers: {}, mail: { messages: [], groups: [], selected: null, configured: false, activeGroup: 'primary', requestId: 0 } };
+const state = { view: 'control', accounts: [], allAccounts: [], selected: null, selectedIds: new Set(), authSession: null, authAccountId: null, avatarBase64: null, loadout: null, timeline: [], analytics: null, enrollment: null, focusMode: false, authenticators: [], authenticatorTimers: {}, mail: { messages: [], groups: [], selected: null, configured: false, activeGroup: 'primary', requestId: 0 } };
 
 async function api(path, options = {}) {
   const isMultipart = options.body instanceof FormData;
@@ -187,8 +187,8 @@ function setView(view) {
 
 async function loadControl() {
   try {
-    const [all, timeline, analytics] = await Promise.all([api('/api/accounts'), api('/api/timeline?limit=12'), api('/api/analytics?days=30')]);
-    state.allAccounts = all; state.timeline = timeline; state.analytics = analytics; renderControl(); renderAnalytics(); await loadOverview(all);
+    const [all, timeline, analytics, enrollment] = await Promise.all([api('/api/accounts'), api('/api/timeline?limit=12'), api('/api/analytics?days=30'), api('/api/enrollment/status')]);
+    state.allAccounts = all; state.timeline = timeline; state.analytics = analytics; state.enrollment = enrollment; renderControl(); renderAnalytics(); renderEnrollment(); await loadOverview(all);
   } catch (error) { toast(error.message, true); }
 }
 
@@ -225,6 +225,28 @@ function renderAnalytics() {
     ].map(([tone, value]) => value ? `<span class="analytics-bar ${tone}" style="height:${Math.max(5, (value / max) * 100)}%" title="${esc(`${label}: ${value} ${tone}`)}"></span>` : '').join('');
     return `<div class="analytics-day" title="${esc(`${label}: ${total} Ereignisse`)}"><div class="analytics-stack">${bars || '<span class="analytics-bar empty"></span>'}</div><small>${esc(label)}</small></div>`;
   }).join('') : '<div class="analytics-empty">Noch keine Ereignisse für diesen Zeitraum.</div>';
+}
+
+function renderEnrollment() {
+  const quota = state.enrollment;
+  if (!quota) return;
+  $('enrollmentQuota').textContent = `${quota.remaining}/${quota.limit} heute frei`;
+  $('prepareEnrollmentButton').disabled = quota.remaining <= 0;
+}
+
+async function prepareEnrollment() {
+  setButtonBusy('prepareEnrollmentButton', true, 'Wird vorbereitet ...');
+  try {
+    const result = await api('/api/enrollment/start', { method: 'POST', body: JSON.stringify({ domain: $('enrollmentDomain').value }) });
+    $('enrollmentSignupLink').href = result.signupUrl;
+    $('enrollmentSignupLink').classList.remove('hidden');
+    $('enrollmentLoginButton').classList.remove('hidden');
+    $('enrollmentNotice').textContent = `Start ${result.quota.used}/${result.quota.limit} verbraucht. Öffne jetzt Steam, erstelle den Account manuell und melde ihn danach hier an.`;
+    state.enrollment = result.quota;
+    renderEnrollment();
+    toast('Registrierung vorbereitet.');
+  } catch (error) { toast(error.message, true); }
+  finally { setButtonBusy('prepareEnrollmentButton', false, 'Registrierung vorbereiten'); }
 }
 
 async function loadAccounts() {
@@ -659,6 +681,7 @@ $('primeFilter').addEventListener('change', loadAccounts); $('accountSearch').ad
 $('bulkRunButton').addEventListener('click', runBulkCommand); $('clearSelectionButton').addEventListener('click', () => { state.selectedIds.clear(); renderAccounts(); });
 $('focusButton').addEventListener('click', () => { state.focusMode = !state.focusMode; renderControl(); });
 $('refreshAllButton').addEventListener('click', loadControl);
+$('prepareEnrollmentButton').addEventListener('click', prepareEnrollment); $('enrollmentLoginButton').addEventListener('click', () => openAuthDialog());
 $('openTimelineButton').addEventListener('click', () => setView('timeline'));
 function downloadExport(format) { window.location.href = `/api/export/accounts?format=${format}`; }
 async function createBackup() {

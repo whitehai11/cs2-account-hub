@@ -29,6 +29,7 @@ builder.Services.AddSingleton<SecretProtector>();
 builder.Services.AddSingleton<SteamAuthenticatorCodeService>();
 builder.Services.AddSingleton<SteamAuthenticatorStore>();
 builder.Services.AddSingleton<ExportBackupService>();
+builder.Services.AddSingleton<EnrollmentStore>();
 builder.Services.AddSingleton<WebSessionService>();
 builder.Services.AddSingleton<SteamPublicProfileService>();
 builder.Services.AddSingleton<SteamBanService>();
@@ -289,6 +290,23 @@ app.MapPost("/api/backup", (BackupRequest request, ExportBackupService exporter)
     {
         return Results.BadRequest(new { message = exception.Message });
     }
+});
+
+app.MapGet("/api/enrollment/status", (EnrollmentStore enrollments) =>
+    Results.Ok(enrollments.GetStatus()));
+
+app.MapPost("/api/enrollment/start", (EnrollmentStartRequest request, EnrollmentStore enrollments) =>
+{
+    if (!enrollments.TryStart(request.Domain, out var session, out var status))
+    {
+        return Results.Json(new
+        {
+            message = "Das Tageslimit von zwei Registrierungsstarts ist erreicht.",
+            quota = status,
+        }, statusCode: StatusCodes.Status429TooManyRequests);
+    }
+
+    return Results.Ok(session);
 });
 
 app.MapGet("/api/mail", (string? query, bool? unread, string? group, int? limit, SteamMailStore mail) =>
