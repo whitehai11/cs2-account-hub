@@ -17,4 +17,6 @@ test('emits safe phase diagnostics for slow GC checks', () => {
   expect(serviceSource).toContain('GC status check {CheckId} started for account {AccountId}.');
   expect(serviceSource).toContain('GC status check {CheckId} finished for account {AccountId}');
   expect(serviceSource).toContain('restrictionFields={HasRestrictionData}');
+  expect(serviceSource).toContain('gcMessages={GcMessages}');
+  expect(serviceSource).toContain('message.MessageType');
 });

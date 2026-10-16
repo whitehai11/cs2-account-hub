@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
 using System.Net;
@@ -52,9 +53,15 @@ internal sealed class CsPremierScoreService
         var helloDeadline = DateTimeOffset.UtcNow + HelloTotalBudget;
         CsAccountProfile? helloData = null;
         var usedProfileFallback = false;
+        var observedGcMessages = new ConcurrentDictionary<uint, int>();
         _logger.LogInformation("GC status check {CheckId} started for account {AccountId}.", checkId, accountId);
 
         await using var cmClient = new SteamCmClient(HttpClient);
+        cmClient.SetGcMessageTap(message =>
+        {
+            if (message.AppId != CsGcSession.Cs2AppId) return;
+            observedGcMessages.AddOrUpdate(message.MessageType, 1, static (_, count) => count + 1);
+        });
         await cmClient.ConnectAndLogOnAsync(refreshToken, steamId, cancellationToken);
         _logger.LogDebug("GC status check {CheckId} completed CM login for account {AccountId} after {ElapsedMs:0} ms.", checkId, accountId, Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
 
@@ -157,7 +164,9 @@ internal sealed class CsPremierScoreService
         }
         finally
         {
-            _logger.LogInformation("GC status check {CheckId} finished for account {AccountId} in {ElapsedMs:0} ms with cooldownData={HasCooldownData}, usedProfileFallback={UsedProfileFallback}.", checkId, accountId, Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds, helloData is not null || usedProfileFallback, usedProfileFallback);
+            var gcMessages = string.Join(",", observedGcMessages.OrderBy(pair => pair.Key).Select(pair => $"{pair.Key}x{pair.Value}"));
+            _logger.LogInformation("GC status check {CheckId} finished for account {AccountId} in {ElapsedMs:0} ms with cooldownData={HasCooldownData}, usedProfileFallback={UsedProfileFallback}, gcMessages={GcMessages}.", checkId, accountId, Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds, helloData is not null || usedProfileFallback, usedProfileFallback, string.IsNullOrWhiteSpace(gcMessages) ? "none" : gcMessages);
+            cmClient.SetGcMessageTap(null);
             try
             {
                 await cmClient.SetGamesPlayedAsync([], CancellationToken.None);
