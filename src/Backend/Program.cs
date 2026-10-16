@@ -940,11 +940,13 @@ internal sealed class AuthSessionStore
 
     private readonly TokenProtector _tokens;
     private readonly AccountEventStore _events;
+    private readonly SteamMailService _mail;
 
-    public AuthSessionStore(TokenProtector tokens, AccountEventStore events)
+    public AuthSessionStore(TokenProtector tokens, AccountEventStore events, SteamMailService mail)
     {
         _tokens = tokens;
         _events = events;
+        _mail = mail;
     }
 
     public async Task<AuthSessionRecord> StartAsync(string accountName, string password, ISteamAccountGateway gateway, AccountStore accounts, CancellationToken cancellationToken)
@@ -1015,12 +1017,37 @@ internal sealed class AuthSessionStore
         }
     }
 
-    private static async Task<string?> WaitForGuardAsync(AuthSessionRecord session, NfaLoader.Services.SteamGuardPrompt prompt, CancellationToken cancellationToken)
+    private async Task<string?> WaitForGuardAsync(AuthSessionRecord session, NfaLoader.Services.SteamGuardPrompt prompt, CancellationToken cancellationToken)
     {
         session.State = prompt.Type is NfaLoader.Services.SteamGuardType.DeviceConfirmation or NfaLoader.Services.SteamGuardType.EmailConfirmation
             ? AuthState.AwaitingConfirmation
             : AuthState.AwaitingSteamGuard;
         session.PromptMessage = prompt.AssociatedMessage ?? "Steam Guard confirmation required.";
+
+        if (prompt.Type == NfaLoader.Services.SteamGuardType.EmailCode)
+        {
+            session.PromptMessage = "Steam Guard-Code wird automatisch in den Catch-all-Mailboxen gesucht ...";
+            using var autoCodeCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var autoCodeTask = _mail.WaitForSteamGuardCodeAsync(session.StartedUtc, TimeSpan.FromSeconds(90), autoCodeCancellation.Token);
+            var manualCodeTask = session.Code.Task.WaitAsync(cancellationToken);
+            var completedTask = await Task.WhenAny(autoCodeTask, manualCodeTask);
+
+            if (completedTask == manualCodeTask)
+            {
+                autoCodeCancellation.Cancel();
+                return await manualCodeTask;
+            }
+
+            var autoCode = await autoCodeTask;
+            if (!string.IsNullOrWhiteSpace(autoCode))
+            {
+                session.PromptMessage = "Steam Guard-Code erkannt. Anmeldung wird automatisch fortgesetzt ...";
+                return autoCode;
+            }
+
+            session.PromptMessage = "Kein Steam Guard-Code automatisch gefunden. Bitte den Code eingeben.";
+        }
+
         return await session.Code.Task.WaitAsync(cancellationToken);
     }
 }
@@ -1036,6 +1063,7 @@ internal sealed class AuthSessionRecord
 
     public Guid Id { get; }
     public string AccountName { get; }
+    public DateTimeOffset StartedUtc { get; } = DateTimeOffset.UtcNow;
     private string? _password;
     public string TakePassword() => Interlocked.Exchange(ref _password, null)
         ?? throw new InvalidOperationException("Authentication password is no longer available.");

@@ -10,6 +10,10 @@ internal sealed class SteamMailService
 {
     private const int MaxBodyCharacters = 24_000;
     private const int MaxPreviewCharacters = 240;
+    private static readonly Regex SteamGuardCodePattern = new(
+        @"(?:login\s+code|steam\s+guard(?:\s+code)?)\s*[:\r\n ]+\s*([A-Z0-9]{5})\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private readonly SemaphoreSlim _syncGate = new(1, 1);
     private readonly SteamMailStore _store;
     private readonly ILogger<SteamMailService> _logger;
 
@@ -27,6 +31,7 @@ internal sealed class SteamMailService
     public async Task<bool> SyncAsync(CancellationToken cancellationToken)
     {
         if (!IsConfigured) return false;
+        await _syncGate.WaitAsync(cancellationToken);
 
         try
         {
@@ -45,6 +50,34 @@ internal sealed class SteamMailService
             _logger.LogWarning("Steam Mail sync failed ({ExceptionType}).", exception.GetType().Name);
             return false;
         }
+        finally
+        {
+            _syncGate.Release();
+        }
+    }
+
+    public async Task<string?> WaitForSteamGuardCodeAsync(DateTimeOffset requestedAfterUtc, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        if (!IsConfigured) return null;
+
+        var deadline = DateTimeOffset.UtcNow.Add(timeout);
+        var sinceUtc = requestedAfterUtc.AddSeconds(-15);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            await SyncAsync(cancellationToken);
+            var messages = _store.RecentSteamGuardMessages(sinceUtc, GetGuardRecipientDomains());
+            foreach (var message in messages)
+            {
+                var code = ExtractSteamGuardCode(message.Subject, message.Body);
+                if (code is not null) return code;
+            }
+
+            var remaining = deadline - DateTimeOffset.UtcNow;
+            if (remaining <= TimeSpan.Zero) break;
+            await Task.Delay(TimeSpan.FromSeconds(Math.Min(5, Math.Max(1, remaining.TotalSeconds))), cancellationToken);
+        }
+
+        return null;
     }
 
     private static async Task SyncMailboxAsync(MailboxConfig mailbox, ICollection<SteamMailRecord> records, CancellationToken cancellationToken)
@@ -85,6 +118,10 @@ internal sealed class SteamMailService
                 Body = body,
                 Preview = NormalizePreview(body),
                 GroupId = groupId,
+                Recipients = summary.Envelope?.To?.Mailboxes
+                    .Select(address => address.Address)
+                    .Where(address => !string.IsNullOrWhiteSpace(address))
+                    .ToList() ?? [],
             });
         }
 
@@ -93,7 +130,8 @@ internal sealed class SteamMailService
 
     private static async Task<string> ReadTextBodyAsync(IMailFolder folder, IMessageSummary summary, CancellationToken cancellationToken)
     {
-        if (summary.TextBody is not { } textPart) return string.Empty;
+        var textPart = summary.TextBody ?? summary.HtmlBody;
+        if (textPart is null) return string.Empty;
         var entity = await folder.GetBodyPartAsync(summary.UniqueId, textPart, cancellationToken);
         return NormalizeBody(entity is TextPart text ? text.Text : entity.ToString());
     }
@@ -167,6 +205,35 @@ internal sealed class SteamMailService
         int.TryParse(Environment.GetEnvironmentVariable("CS2_HUB_IMAP_RETENTION_DAYS"), out var days)
             ? Math.Clamp(days, 1, 365)
             : 30;
+
+    private static IReadOnlySet<string> GetGuardRecipientDomains()
+    {
+        var domains = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var value in (Environment.GetEnvironmentVariable("CS2_HUB_STEAM_GUARD_DOMAINS") ?? string.Empty)
+                     .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (value.Length is > 0 and <= 253) domains.Add(value.TrimStart('@'));
+        }
+
+        foreach (var mailbox in GetMailboxes())
+        {
+            var at = mailbox.Username.LastIndexOf('@');
+            if (at >= 0 && at < mailbox.Username.Length - 1)
+            {
+                domains.Add(mailbox.Username[(at + 1)..].Trim().TrimStart('@'));
+            }
+        }
+
+        return domains;
+    }
+
+    private static string? ExtractSteamGuardCode(string subject, string body)
+    {
+        var source = Regex.Replace($"{subject}\n{body}", "<[^>]+>", " ");
+        source = WebUtility.HtmlDecode(source);
+        var match = SteamGuardCodePattern.Match(source);
+        return match.Success ? match.Groups[1].Value.ToUpperInvariant() : null;
+    }
 
     private sealed record MailboxConfig(string GroupId, string Host, int Port, string Username, string Password, string Folder);
 }

@@ -69,6 +69,21 @@ internal sealed class SteamMailStore
         }
     }
 
+    public IReadOnlyList<SteamMailRecord> RecentSteamGuardMessages(DateTimeOffset sinceUtc, IReadOnlyCollection<string> allowedDomains)
+    {
+        if (allowedDomains.Count == 0) return [];
+
+        lock (_gate)
+        {
+            return _messages.Values
+                .Where(message => message.ReceivedUtc >= sinceUtc)
+                .Where(message => SteamMailRouting.ClassifySender(message.Sender, message.GroupId) is not null)
+                .Where(message => message.Recipients.Any(recipient => allowedDomains.Any(domain => MatchesDomain(recipient, domain))))
+                .OrderByDescending(message => message.ReceivedUtc)
+                .ToArray();
+        }
+    }
+
     public bool MarkRead(Guid id, bool isRead)
     {
         lock (_gate)
@@ -95,6 +110,7 @@ internal sealed class SteamMailStore
                     existing.Body = message.Body;
                     existing.RemoteKey = message.RemoteKey;
                     existing.GroupId = message.GroupId;
+                    existing.Recipients = message.Recipients;
                 }
                 else
                 {
@@ -150,6 +166,15 @@ internal sealed class SteamMailStore
         File.WriteAllText(temporaryPath, JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true }));
         File.Move(temporaryPath, _path, overwrite: true);
     }
+
+    private static bool MatchesDomain(string recipient, string allowedDomain)
+    {
+        var at = recipient.LastIndexOf('@');
+        if (at < 0) return false;
+        var domain = recipient[(at + 1)..].Trim().TrimEnd('>').ToLowerInvariant();
+        var normalizedAllowed = allowedDomain.Trim().TrimStart('@').ToLowerInvariant();
+        return domain == normalizedAllowed || domain.EndsWith($".{normalizedAllowed}", StringComparison.Ordinal);
+    }
 }
 
 internal sealed record SteamMailSnapshot(
@@ -186,4 +211,5 @@ internal sealed class SteamMailRecord
     public string Preview { get; set; } = string.Empty;
     public string Body { get; set; } = string.Empty;
     public string GroupId { get; set; } = "primary";
+    public List<string> Recipients { get; set; } = [];
 }

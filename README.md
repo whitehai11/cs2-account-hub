@@ -39,6 +39,9 @@ CS2_HUB_IMAP_USERNAME=steam@example.com
 CS2_HUB_IMAP_PASSWORD=replace-with-mail-password
 # Optional: comma-separated exact addresses/domains; defaults to Steam domains
 CS2_HUB_IMAP_SENDERS=steampowered.com,steamcommunity.com
+# Optional allowlist for automatic Steam Guard code lookup; when empty, the
+# domains of the configured IMAP mailbox usernames are used automatically.
+CS2_HUB_STEAM_GUARD_DOMAINS=first-domain.example,second-domain.example
 # Optional second sender/domain group shown as a separate Mail area
 CS2_HUB_IMAP_SENDERS_SECONDARY=example.org
 CS2_HUB_IMAP_PRIMARY_LABEL=Steam
