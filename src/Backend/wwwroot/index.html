@@ -38,7 +38,7 @@
 
     <main class="main">
       <header class="topbar">
-        <div><span id="pageKicker" class="eyebrow">OPERATIONS / LIVE</span><h2 id="pageTitle">Mission Control</h2><p id="pageSubtitle" class="muted">Alle Accounts. Alle Signale. Ein klarer nächster Schritt.</p></div>
+        <div><span id="pageKicker" class="eyebrow">ACCOUNT FLEET</span><h2 id="pageTitle">Mission Control</h2><p id="pageSubtitle" class="muted">Alle Accounts. Alle Signale. Ein klarer nächster Schritt.</p></div>
         <div class="top-actions"><span id="userLabel" class="user-chip"></span><button id="refreshButton"><span class="refresh-icon">↻</span> Aktualisieren</button></div>
       </header>
       <div id="toast" class="toast hidden"></div>
@@ -46,7 +46,7 @@
       <section id="signalBar" class="signal-bar"><div class="signal-title"><span class="live-dot"></span><div><strong>CM / GC Monitor</strong><small>Serverseitige Live-Übersicht</small></div></div><div class="signal-stat"><small>GC gesund</small><strong id="healthCount">—</strong></div><div class="signal-stat"><small>In CS2-Match</small><strong id="inMatchCount">—</strong></div><div class="signal-stat"><small>Loadout-Diffs</small><strong id="driftCount">—</strong></div><div class="signal-next"><small>Nächster Check</small><strong id="nextCheckHint">—</strong></div></section>
 
       <section id="controlView" class="control-view">
-        <div class="control-hero"><div><span class="eyebrow">ACCOUNT FLEET</span><h3>Was braucht gerade Aufmerksamkeit?</h3><p class="muted">Mission Control bündelt den Zustand deiner Accounts und die letzten Signale.</p></div><div class="control-actions"><button id="focusButton" class="secondary">Nur Aufmerksamkeit</button><button id="refreshAllButton" class="primary">Fleet prüfen</button></div></div>
+        <div class="control-hero"><div><h3>Was braucht gerade Aufmerksamkeit?</h3><p class="muted">Status, Warnungen und Aktionen auf einer Fläche.</p></div><div class="control-actions"><button id="focusButton" class="secondary">Nur Aufmerksamkeit</button><button id="refreshAllButton" class="primary">Fleet prüfen</button></div></div>
         <div class="control-grid"><section class="panel attention-panel"><div class="panel-head"><div><h3>Attention Queue</h3><p class="muted">Sortiert nach Dringlichkeit</p></div><span id="attentionCount" class="panel-count">—</span></div><div id="attentionList" class="attention-list"></div></section><section class="panel signals-panel"><div class="panel-head"><div><h3>Live Signals</h3><p class="muted">Die letzten Änderungen im Hub</p></div><button id="openTimelineButton" class="text-button">Alle öffnen</button></div><div id="controlSignals" class="control-signals"></div></section></div>
       </section>
 
