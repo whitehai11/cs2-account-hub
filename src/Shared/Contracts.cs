@@ -4,6 +4,7 @@ public enum AccountSection
 {
     PlayReady = 0,
     NotPlayReady = 1,
+    VacBanned = 2,
 }
 
 public enum AccountPrimeBucket

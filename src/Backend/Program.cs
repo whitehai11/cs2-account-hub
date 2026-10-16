@@ -668,6 +668,7 @@ internal sealed class AccountStore
                 {
                     account.CooldownEndsUtc = account.StatusUpdatedUtc.Value.AddSeconds(account.CooldownSeconds.Value);
                 }
+                if (account.HasVacBan) account.Section = AccountSection.VacBanned;
                 _accounts[account.Id] = account;
             }
         }
@@ -1435,6 +1436,9 @@ internal sealed class AccountRecord
     public List<RecentMatchDto> RecentMatches { get; set; } = new();
     public List<RatingPointDto> RatingHistory { get; set; } = new();
 
+    [JsonIgnore]
+    public bool HasVacBan => VacBanned is true || SteamVacBanned is true;
+
     public void ApplyStatus(NfaLoader.Models.CsPremierScoreResult status, AccountPrimeBucket? prime = null)
     {
         var now = DateTimeOffset.UtcNow;
@@ -1489,9 +1493,7 @@ internal sealed class AccountRecord
         if (prime is not null && prime != AccountPrimeBucket.Unknown) Prime = prime.Value;
         else if (Prime == AccountPrimeBucket.Unknown && status.HasPremierScore) Prime = AccountPrimeBucket.Prime;
 
-        Section = status.HasCooldownData && !status.HasCooldown && status.GcVacBannedOrUnknown is false && Cs2Owned is not false && SteamGameBanned is not true
-            ? AccountSection.PlayReady
-            : AccountSection.NotPlayReady;
+        UpdateSection();
     }
 
     public void ApplyCs2Ownership(SteamGameOwnershipSnapshot ownership)
@@ -1499,14 +1501,7 @@ internal sealed class AccountRecord
         Cs2Owned = ownership.OwnsCs2;
         Cs2OwnershipCheckedUtc = ownership.CheckedUtc;
 
-        if (!ownership.OwnsCs2)
-        {
-            Section = AccountSection.NotPlayReady;
-        }
-        else if (CooldownVerifiedUtc is not null && CooldownSeconds is 0 && VacBanned is false && SteamGameBanned is not true)
-        {
-            Section = AccountSection.PlayReady;
-        }
+        UpdateSection();
     }
 
     public void ApplySteamBans(SteamBanSnapshot bans)
@@ -1519,14 +1514,28 @@ internal sealed class AccountRecord
         SteamEconomyBan = bans.EconomyBan;
         SteamBansCheckedUtc = bans.CheckedUtc;
 
-        if (bans.GameBanned)
+        UpdateSection();
+    }
+
+    private void UpdateSection()
+    {
+        if (HasVacBan)
+        {
+            Section = AccountSection.VacBanned;
+            return;
+        }
+
+        if (Cs2Owned is false || SteamGameBanned is true)
         {
             Section = AccountSection.NotPlayReady;
+            return;
         }
-        else if (CooldownVerifiedUtc is not null && CooldownSeconds is 0 && VacBanned is false)
-        {
-            Section = AccountSection.PlayReady;
-        }
+
+        Section = CooldownVerifiedUtc is not null
+            && CooldownSeconds is 0
+            && VacBanned is false
+            ? AccountSection.PlayReady
+            : AccountSection.NotPlayReady;
     }
 
     public void ApplyProfile(SteamProfileSnapshot? profile)

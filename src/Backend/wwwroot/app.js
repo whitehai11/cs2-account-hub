@@ -20,7 +20,8 @@ async function api(path, options = {}) {
 
 function enumName(value, names) { return typeof value === 'number' ? names[value] : value; }
 function primeName(value) { return enumName(value, ['Unknown', 'Prime', 'NonPrime']) || 'Unknown'; }
-function sectionName(value) { return enumName(value, ['PlayReady', 'NotPlayReady']) || 'NotPlayReady'; }
+function sectionName(value) { return enumName(value, ['PlayReady', 'NotPlayReady', 'VacBanned']) || 'NotPlayReady'; }
+function hasVacBan(account) { return account.vacBanned === true || account.steamVacBanned === true; }
 function healthLabel(value) { return value === 'healthy' ? 'GC gesund' : value === 'gc-unknown' ? 'GC unvollständig' : value === 'login-required' ? 'Steam-Login erneut erforderlich' : value?.startsWith('error:') ? 'GC-Fehler' : 'Noch nicht geprüft'; }
 function presenceLabel(account) { return account.inMatch === true ? 'In CS2-Match' : account.inMatch === false ? 'Nicht im Match' : 'Unbekannt'; }
 function steamBanText(account) {
@@ -37,7 +38,7 @@ function readinessReason(account) {
   if (account.loginRequiresReauthentication) return 'Steam-Login erneut erforderlich';
   if (account.cs2Owned === false) return 'CS2 nicht im Besitz';
   if (account.steamGameBanned === true) return 'Steam Game-Ban';
-  if (account.vacBanned === true) return 'GC meldet VAC-Ban';
+  if (hasVacBan(account)) return 'VAC-Ban';
   if (remainingSeconds(account) > 0) return 'Cooldown aktiv';
   if (account.healthStatus && account.healthStatus !== 'healthy') return healthLabel(account.healthStatus);
   return sectionName(account.section) === 'PlayReady' ? 'Bereit' : 'Nicht bestätigt';
@@ -122,9 +123,9 @@ function avatarMarkup(account, size = '') {
     : `<span class="avatar-fallback ${size}">${esc((account.personaName || '?').slice(0, 1).toUpperCase())}</span>`;
 }
 function accountAttention(account) {
+  if (hasVacBan(account)) return ['critical', 'VAC-Ban', 'Account gesperrt'];
   if (account.steamGameBanned === true) return ['critical', 'Game-Ban', 'Steam-Ban erkannt'];
   if (account.cs2Owned === false) return ['critical', 'CS2 nicht im Besitz', 'Spielzugriff fehlt'];
-  if (account.vacBanned === true) return ['critical', 'VAC-Status', 'Sofort prüfen'];
   if (account.loginRequiresReauthentication) return ['critical', 'Steam-Login abgelaufen', 'Neu anmelden'];
   if (remainingSeconds(account) > 0) return ['warning', 'Cooldown aktiv', duration(account)];
   if (account.healthStatus && account.healthStatus !== 'healthy') return ['warning', healthLabel(account.healthStatus), 'GC-Check wiederholen'];
@@ -174,7 +175,7 @@ function setView(view) {
   $('signalBar').classList.toggle('hidden', settings || mail || authenticator);
   $('loadoutSettings').classList.toggle('hidden', view !== 'loadout');
   $('personalizeSettings').classList.toggle('hidden', view !== 'personalize');
-  const titles = { control: ['Mission Control', 'Alle Accounts. Alle Signale. Ein klarer nächster Schritt.'], play: ['Play Ready', 'Accounts ohne aktiven Cooldown oder VAC'], notplay: ['Not Play Ready', 'Accounts mit Cooldown, VAC oder unbekanntem Status'], mail: ['Steam Mail', 'Globaler Steam-Posteingang ohne Account-Zuordnung'], authenticator: ['Steam Authenticator', 'MAFile-gestützte Steam-Guard-Codes mit Account-Abgleich'], loadout: ['Loadout', 'Serverseitige Presets und Synchronisierung'], personalize: ['Personalize', 'Profil-Presets und Account-Timeline'] };
+  const titles = { control: ['Mission Control', 'Alle Accounts. Alle Signale. Ein klarer nächster Schritt.'], play: ['Play Ready', 'Accounts ohne aktiven Cooldown oder VAC'], notplay: ['Not Play Ready', 'Accounts mit Cooldown oder unbekanntem Status'], vac: ['VAC-Ban', 'Accounts mit erkanntem VAC-Ban'], mail: ['Steam Mail', 'Globaler Steam-Posteingang ohne Account-Zuordnung'], authenticator: ['Steam Authenticator', 'MAFile-gestützte Steam-Guard-Codes mit Account-Abgleich'], loadout: ['Loadout', 'Serverseitige Presets und Synchronisierung'], personalize: ['Personalize', 'Profil-Presets und Account-Timeline'] };
   $('pageTitle').textContent = titles[view][0]; $('pageSubtitle').textContent = titles[view][1];
   const animatedView = control ? $('controlView') : mail ? $('mailView') : authenticator ? $('authenticatorView') : settings ? $('settingsView') : $('accountsView'); animatedView.classList.remove('view-enter'); requestAnimationFrame(() => animatedView.classList.add('view-enter'));
   if (control) loadControl(); else if (mail) loadMail(); else if (authenticator) loadAuthenticators(); else if (settings) loadSettings(); else loadAccounts();
@@ -182,8 +183,8 @@ function setView(view) {
 
 async function loadControl() {
   try {
-    const [ready, notReady, timeline] = await Promise.all([api('/api/accounts?section=PlayReady'), api('/api/accounts?section=NotPlayReady'), api('/api/timeline?limit=12')]);
-    state.allAccounts = [...ready, ...notReady]; state.timeline = timeline; renderControl(); await loadOverview();
+    const [all, timeline] = await Promise.all([api('/api/accounts'), api('/api/timeline?limit=12')]);
+    state.allAccounts = all; state.timeline = timeline; renderControl(); await loadOverview(all);
   } catch (error) { toast(error.message, true); }
 }
 
@@ -194,11 +195,11 @@ function renderControl() {
   $('focusButton').textContent = state.focusMode ? 'Fleet anzeigen' : 'Nur Aufmerksamkeit';
   $('attentionList').innerHTML = visible.length ? visible.map(account => { const item = accountAttention(account); return `<button class="attention-row ${item[0]}" data-account-id="${account.id}"><span class="attention-icon">${item[0] === 'critical' ? '!' : item[0] === 'warning' ? '◷' : '·'}</span><span class="attention-main"><strong>${esc(account.personaName || account.steamId)}</strong><small>${esc(item[1])} · ${esc(item[2])}</small></span><span class="attention-arrow">→</span></button>`; }).join('') : '<div class="control-empty"><strong>Fleet ist ruhig</strong><span>Aktuell braucht kein Account deine Aufmerksamkeit.</span></div>';
   $('controlSignals').innerHTML = state.timeline.length ? state.timeline.slice(0, 8).map(item => `<button class="control-signal ${esc(item.severity || 'info')}" data-account-id="${item.accountId}"><span class="timeline-icon">${timelineIcon(item.type)}</span><span><strong>${esc(signalTitle(item))}</strong><small>${esc(item.personaName || item.steamId)} · ${esc(relativeTime(item.occurredUtc))}</small></span><span class="control-signal-arrow">→</span></button>`).join('') : '<div class="control-empty"><strong>Noch keine Signale</strong><span>Scheduler-Checks und Aktionen erscheinen hier.</span></div>';
-  document.querySelectorAll('[data-account-id]').forEach(button => button.addEventListener('click', () => { setView('play'); selectAccount(button.dataset.accountId); }));
+  document.querySelectorAll('[data-account-id]').forEach(button => button.addEventListener('click', () => { const account = state.allAccounts.find(item => item.id === button.dataset.accountId); setView(account && sectionName(account.section) === 'VacBanned' ? 'vac' : account && sectionName(account.section) === 'NotPlayReady' ? 'notplay' : 'play'); selectAccount(button.dataset.accountId); }));
 }
 
 async function loadAccounts() {
-  const section = state.view === 'notplay' ? 'NotPlayReady' : 'PlayReady';
+  const section = state.view === 'notplay' ? 'NotPlayReady' : state.view === 'vac' ? 'VacBanned' : 'PlayReady';
   const prime = $('primeFilter').value;
   try {
     state.accounts = await api(`/api/accounts?section=${section}${prime ? `&prime=${prime}` : ''}`);
@@ -209,11 +210,11 @@ async function loadAccounts() {
   } catch (error) { toast(error.message, true); }
 }
 
-async function loadOverview() {
+async function loadOverview(accounts = null) {
   try {
-    const ready = state.allAccounts.filter(account => sectionName(account.section) === 'PlayReady');
-    const notReady = state.allAccounts.filter(account => sectionName(account.section) !== 'PlayReady');
-    const all = state.allAccounts;
+    const all = accounts || await api('/api/accounts');
+    const ready = all.filter(account => sectionName(account.section) === 'PlayReady');
+    const notReady = all.filter(account => sectionName(account.section) === 'NotPlayReady');
     $('readyCount').textContent = ready.length;
     $('notReadyCount').textContent = notReady.length;
     $('primeCount').textContent = all.filter(a => primeName(a.prime) === 'Prime').length;
@@ -232,10 +233,10 @@ function renderAccounts() {
     (account.personaName || '').toLowerCase().includes(query) || (account.accountName || '').toLowerCase().includes(query) || account.steamId.includes(query));
   $('accountCount').textContent = `${list.length} Account${list.length === 1 ? '' : 's'}`;
   $('accountList').innerHTML = list.length ? list.map(account => `
-    <button class="account-row ${state.selected?.id === account.id ? 'selected' : ''}" data-id="${account.id}">
+    <button class="account-row ${hasVacBan(account) ? 'vac-banned' : ''} ${state.selected?.id === account.id ? 'selected' : ''}" data-id="${account.id}">
       <span class="avatar">${avatarMarkup(account)}</span>
-      <span class="account-main"><span class="account-name">${esc(account.personaName || 'Unbekannter Account')} ${account.isPermaGreen ? '<span class="perma-badge">PERMA-GREEN</span>' : ''}</span><span class="account-meta">${esc(account.accountName || 'Anmeldename unbekannt')} · ${esc(account.steamId)} · ${primeName(account.prime)} · ${healthLabel(account.healthStatus)}</span>${account.loginRequiresReauthentication ? '<span class="account-login-warning">Steam-Login erneut erforderlich</span>' : ''}${account.cs2Owned === false ? '<span class="account-login-warning">CS2 nicht im Besitz</span>' : ''}${account.nextCooldownSeconds ? `<span class="account-next-cooldown">Nächster Cooldown: ${nextCooldownText(account)}</span>` : ''}</span>
-      <span class="status-pill ${account.loginRequiresReauthentication || sectionName(account.section) !== 'PlayReady' ? 'bad' : ''}">${account.loginRequiresReauthentication ? 'Login nötig' : sectionName(account.section) === 'PlayReady' ? 'Ready' : 'Nicht ready'}</span>
+      <span class="account-main"><span class="account-name">${esc(account.personaName || 'Unbekannter Account')} ${account.isPermaGreen ? '<span class="perma-badge">PERMA-GREEN</span>' : ''}</span><span class="account-meta">${esc(account.accountName || 'Anmeldename unbekannt')} · ${esc(account.steamId)} · ${primeName(account.prime)} · ${healthLabel(account.healthStatus)}</span>${hasVacBan(account) ? '<span class="account-login-warning vac-warning">VAC-Ban erkannt</span>' : ''}${account.loginRequiresReauthentication ? '<span class="account-login-warning">Steam-Login erneut erforderlich</span>' : ''}${account.cs2Owned === false ? '<span class="account-login-warning">CS2 nicht im Besitz</span>' : ''}${account.nextCooldownSeconds ? `<span class="account-next-cooldown">Nächster Cooldown: ${nextCooldownText(account)}</span>` : ''}</span>
+      <span class="status-pill ${hasVacBan(account) ? 'vac' : account.loginRequiresReauthentication || sectionName(account.section) !== 'PlayReady' ? 'bad' : ''}">${hasVacBan(account) ? 'VAC-Ban' : account.loginRequiresReauthentication ? 'Login nötig' : sectionName(account.section) === 'PlayReady' ? 'Ready' : 'Nicht ready'}</span>
     </button>`).join('') : '<div class="empty">Keine Accounts in dieser Kategorie.</div>';
   document.querySelectorAll('.account-row').forEach(row => row.addEventListener('click', () => selectAccount(row.dataset.id)));
 }
@@ -254,12 +255,12 @@ function renderDetails() {
   $('emptyDetails').classList.add('hidden'); $('accountDetails').classList.remove('hidden');
   $('accountDetails').innerHTML = `
     <div class="details">
-      <div class="detail-head"><span class="avatar avatar-large">${avatarMarkup(account, 'large')}</span><div class="detail-identity"><h3>${esc(account.personaName || 'Unbekannter Account')}</h3><span class="muted">Anmeldename: ${esc(account.accountName || 'unbekannt')} · Steam-ID: ${esc(account.steamId)}</span><div class="status-badges"><span class="badge ${account.loginRequiresReauthentication ? 'bad' : sectionName(account.section) === 'PlayReady' ? 'good' : 'bad'}">${account.loginRequiresReauthentication ? 'Login erneut nötig' : sectionName(account.section) === 'PlayReady' ? 'Play Ready' : 'Not Play Ready'}</span><span class="badge">${primeName(account.prime)}</span><span class="badge ${account.inMatch ? 'live' : ''}">${presenceLabel(account)}</span>${account.publicPlayingCs2 ? '<span class="badge live">CS2 erkannt</span>' : ''}${account.monitoringPaused ? '<span class="badge perma-badge">CHECKS PAUSIERT</span>' : ''}${account.isPermaGreen ? '<span class="badge perma-badge">PERMA-GREEN</span>' : ''}</div></div></div>
+      <div class="detail-head"><span class="avatar avatar-large">${avatarMarkup(account, 'large')}</span><div class="detail-identity"><h3>${esc(account.personaName || 'Unbekannter Account')}</h3><span class="muted">Anmeldename: ${esc(account.accountName || 'unbekannt')} · Steam-ID: ${esc(account.steamId)}</span><div class="status-badges"><span class="badge ${hasVacBan(account) ? 'vac' : account.loginRequiresReauthentication ? 'bad' : sectionName(account.section) === 'PlayReady' ? 'good' : 'bad'}">${hasVacBan(account) ? 'VAC-Ban' : account.loginRequiresReauthentication ? 'Login erneut nötig' : sectionName(account.section) === 'PlayReady' ? 'Play Ready' : 'Not Play Ready'}</span><span class="badge">${primeName(account.prime)}</span><span class="badge ${account.inMatch ? 'live' : ''}">${presenceLabel(account)}</span>${account.publicPlayingCs2 ? '<span class="badge live">CS2 erkannt</span>' : ''}${account.monitoringPaused ? '<span class="badge perma-badge">CHECKS PAUSIERT</span>' : ''}${account.isPermaGreen ? '<span class="badge perma-badge">PERMA-GREEN</span>' : ''}</div></div></div>
       ${account.loginRequiresReauthentication ? `<div class="login-required-alert"><strong>Steam-Login erneut erforderlich</strong><span>Die gespeicherte Session für <b>${esc(account.accountName || account.personaName || account.steamId)}</b> wurde abgewiesen. Aktualisiere den Login, um automatische Checks und Aktionen fortzusetzen.</span><button id="reauthenticateAlertButton" class="danger-action">Jetzt neu anmelden</button></div>` : ''}
       <div class="health-grid"><div class="health-card"><small>GC-Verbindung</small><strong>${healthLabel(account.healthStatus)}</strong><span>${formatDate(account.lastCheckUtc || account.statusUpdatedUtc)}</span></div><div class="health-card"><small>Cooldown</small><strong class="${remainingSeconds(account) > 0 ? 'warning-text' : ''}">${cooldownPhase(account)}</strong><span>${duration(account)}</span></div><div class="health-card"><small>Loadout</small><strong>${account.loadoutMismatchCount ?? '—'}</strong><span>${account.loadoutCheckedUtc ? `geprüft ${relativeTime(account.loadoutCheckedUtc)}` : 'noch nicht geprüft'}</span></div></div>
       <div class="stat-grid"><div class="stat"><small>Premier Rating</small><strong>${account.premierRating ?? '—'}</strong></div><div class="stat"><small>CS2 Level</small><strong>${account.cs2Level ?? '—'}</strong></div></div>
       ${renderRatingTrend(account)}
-      <div class="detail-lines"><div class="detail-line"><span>Play-Ready-Grund</span><strong>${esc(readinessReason(account))}</strong></div><div class="detail-line"><span>CS2-Besitz</span><strong>${esc(cs2OwnershipText(account))}</strong></div><div class="detail-line"><span>GC-VAC</span><strong>${account.vacBanned === true ? 'Ja' : account.vacBanned === false ? 'Nein' : 'Unbekannt'}</strong></div><div class="detail-line"><span>Steam-Bans</span><strong>${esc(steamBanText(account))}</strong></div><div class="detail-line"><span>Cooldown-Ende</span><strong>${formatDate(account.cooldownEndsUtc)}</strong></div>${account.nextCooldownSeconds ? `<div class="detail-line"><span>Nächster Cooldown</span><strong class="next-cooldown-value">${nextCooldownText(account)}</strong></div>` : ''}<div class="detail-line"><span>Nächster GC-Check</span><strong>${formatDate(account.nextCheckUtc)} <span class="muted">(${relativeTime(account.nextCheckUtc)})</span></strong></div><div class="detail-line"><span>Letzter Login</span><strong>${formatDate(account.lastLoginUtc)}</strong></div></div>
+      <div class="detail-lines"><div class="detail-line"><span>Play-Ready-Grund</span><strong class="${hasVacBan(account) ? 'vac-text' : ''}">${esc(readinessReason(account))}</strong></div><div class="detail-line"><span>CS2-Besitz</span><strong>${esc(cs2OwnershipText(account))}</strong></div><div class="detail-line"><span>VAC-Ban</span><strong class="${hasVacBan(account) ? 'vac-text' : ''}">${hasVacBan(account) ? 'Ja' : account.vacBanned === false && account.steamVacBanned !== true ? 'Nein' : 'Unbekannt'}</strong></div><div class="detail-line"><span>Steam-Bans</span><strong>${esc(steamBanText(account))}</strong></div><div class="detail-line"><span>Cooldown-Ende</span><strong>${formatDate(account.cooldownEndsUtc)}</strong></div>${account.nextCooldownSeconds ? `<div class="detail-line"><span>Nächster Cooldown</span><strong class="next-cooldown-value">${nextCooldownText(account)}</strong></div>` : ''}<div class="detail-line"><span>Nächster GC-Check</span><strong>${formatDate(account.nextCheckUtc)} <span class="muted">(${relativeTime(account.nextCheckUtc)})</span></strong></div><div class="detail-line"><span>Letzter Login</span><strong>${formatDate(account.lastLoginUtc)}</strong></div></div>
       <div class="note-row"><input id="noteInput" value="${esc(account.note || '')}" placeholder="Notiz..."><button id="saveNote">Speichern</button></div>
       <div class="detail-actions"><button id="refreshLoginButton" class="primary-action">Login aktualisieren</button><button data-command="RefreshStatus">Status aktualisieren</button><button data-command="SyncLoadout">Loadout prüfen</button><button data-command="ClearWorkshop">Workshop leeren</button><button data-command="ApplyLoadout">Loadout anwenden</button><button data-command="Personalize">Personalize</button><button id="permaGreenButton" class="perma-action">${account.isPermaGreen ? 'Perma-Green entfernen' : 'Als Perma-Green markieren'}</button><button id="monitoringButton" class="monitoring-action">${account.monitoringPaused ? 'Checks fortsetzen' : 'Spielmodus aktivieren'}</button><button id="deleteAccountButton" class="danger-action">Account aus System löschen</button></div>
       ${renderRecentMatches(account)}
@@ -578,7 +579,7 @@ async function checkSession() { try { const me = await api('/api/web/me'); showA
 
 $('loginForm').addEventListener('submit', async event => { event.preventDefault(); setButtonBusy('dashboardLoginButton', true, 'Anmeldung läuft ...'); $('loginError').textContent = ''; try { const me = await api('/api/web/login', { method: 'POST', body: JSON.stringify({ username: $('loginUsername').value, password: $('loginPassword').value }) }); $('loginPassword').value = ''; showApp(me.username); await loadSettings(); await loadControl(); } catch (error) { $('loginError').textContent = error.message; setButtonBusy('dashboardLoginButton', false, 'Dashboard öffnen'); } });
 document.querySelectorAll('.nav-item').forEach(item => item.addEventListener('click', () => setView(item.dataset.view)));
-$('refreshButton').addEventListener('click', () => state.view === 'play' || state.view === 'notplay' ? loadAccounts() : state.view === 'control' ? loadControl() : state.view === 'mail' ? loadMail() : state.view === 'authenticator' ? loadAuthenticators() : loadSettings());
+$('refreshButton').addEventListener('click', () => state.view === 'play' || state.view === 'notplay' || state.view === 'vac' ? loadAccounts() : state.view === 'control' ? loadControl() : state.view === 'mail' ? loadMail() : state.view === 'authenticator' ? loadAuthenticators() : loadSettings());
 $('primeFilter').addEventListener('change', loadAccounts); $('accountSearch').addEventListener('input', renderAccounts);
 $('focusButton').addEventListener('click', () => { state.focusMode = !state.focusMode; renderControl(); });
 $('refreshAllButton').addEventListener('click', loadControl);

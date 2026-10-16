@@ -106,10 +106,15 @@ button:hover .refresh-icon { transform: rotate(180deg); }
 .filters { display: flex; gap: 9px; margin: 20px 0 14px; } .filters select { width: 205px; } .filters input { flex: 1; }
 .account-list { display: grid; gap: 8px; } .account-row { display: flex; align-items: center; gap: 13px; width: 100%; padding: 13px; border: 1px solid var(--line); border-radius: 12px; background: rgba(13,23,40,.72); text-align: left; animation: row-in .35s both; }
 .account-row:hover { border-color: #3d6190; background: #152742; } .account-row.selected { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(75,156,255,.12); }
+.account-row.vac-banned { border-color: rgba(245,45,63,.8); background: linear-gradient(135deg, rgba(91,17,27,.92), rgba(30,12,19,.9)); box-shadow: 0 0 0 1px rgba(245,45,63,.22), 0 10px 24px rgba(108,12,25,.34), inset 3px 0 #ff3e54; }
+.account-row.vac-banned:hover, .account-row.vac-banned.selected { border-color: #ff5969; background: linear-gradient(135deg, rgba(119,20,33,.96), rgba(42,12,20,.94)); box-shadow: 0 0 0 2px rgba(255,69,88,.28), 0 12px 28px rgba(108,12,25,.46), inset 3px 0 #ff334b; }
 .avatar { width: 44px; height: 44px; display: grid; place-items: center; flex: none; overflow: hidden; border-radius: 50%; background: #1d2c42; } .avatar-image { width: 100%; height: 100%; object-fit: cover; } .avatar-fallback { width: 100%; height: 100%; display: grid; place-items: center; color: #9bb0ca; font-weight: 800; } .avatar.large { width: 70px; height: 70px; }
 .account-main { min-width: 0; flex: 1; } .account-name { display: block; overflow: hidden; color: #e9f1fb; font-weight: 720; white-space: nowrap; text-overflow: ellipsis; } .account-meta { display: block; overflow: hidden; margin-top: 4px; color: #7e93af; font-size: 11px; white-space: nowrap; text-overflow: ellipsis; } .account-next-cooldown { display: block; margin-top: 3px; color: #6f9bd0; font-size: 10px; }
 .account-login-warning { display: block; margin-top: 4px; color: #ff9ba1; font-size: 10px; font-weight: 750; }
+.account-login-warning.vac-warning, .vac-text { color: #ff5368 !important; font-weight: 800; }
+.nav-item-vac.active { border-color: rgba(255,87,101,.72); color: #ff8090; background: linear-gradient(90deg, rgba(176,25,46,.38), rgba(74,12,23,.12)); box-shadow: inset 3px 0 #ff334b, 0 0 18px rgba(245,45,63,.12); }
 .status-pill, .badge { display: inline-flex; align-items: center; width: max-content; border-radius: 999px; color: #91e6b9; background: rgba(57,217,138,.12); font-size: 10px; font-weight: 700; white-space: nowrap; } .status-pill { padding: 5px 9px; } .status-pill.bad, .badge.bad { color: #ff9ba1; background: rgba(255,107,117,.12); }
+.status-pill.vac, .badge.vac { color: #fff0f2; background: rgba(245,45,63,.38); border: 1px solid rgba(255,87,101,.72); box-shadow: 0 0 18px rgba(245,45,63,.28), inset 0 1px rgba(255,255,255,.12); }
 .empty { display: grid; place-items: center; min-height: 300px; color: #7186a2; text-align: center; }
 
 /* Account details */
