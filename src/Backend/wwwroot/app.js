@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const state = { view: 'control', accounts: [], allAccounts: [], selected: null, authSession: null, authAccountId: null, avatarBase64: null, loadout: null, timeline: [], focusMode: false, authenticators: [], authenticatorTimers: {}, mail: { messages: [], groups: [], selected: null, configured: false, activeGroup: 'primary', requestId: 0 } };
+const state = { view: 'control', accounts: [], allAccounts: [], selected: null, selectedIds: new Set(), authSession: null, authAccountId: null, avatarBase64: null, loadout: null, timeline: [], focusMode: false, authenticators: [], authenticatorTimers: {}, mail: { messages: [], groups: [], selected: null, configured: false, activeGroup: 'primary', requestId: 0 } };
 
 async function api(path, options = {}) {
   const isMultipart = options.body instanceof FormData;
@@ -204,6 +204,7 @@ async function loadAccounts() {
   const section = state.view === 'notplay' ? 'NotPlayReady' : state.view === 'vac' ? 'VacBanned' : 'PlayReady';
   const prime = $('primeFilter').value;
   try {
+    state.selectedIds.clear();
     state.accounts = await api(`/api/accounts?section=${section}${prime ? `&prime=${prime}` : ''}`);
     state.allAccounts = state.accounts;
     renderAccounts();
@@ -236,12 +237,54 @@ function renderAccounts() {
     (account.personaName || '').toLowerCase().includes(query) || (account.accountName || '').toLowerCase().includes(query) || account.steamId.includes(query));
   $('accountCount').textContent = `${list.length} Account${list.length === 1 ? '' : 's'}`;
   $('accountList').innerHTML = list.length ? list.map(account => `
-    <button class="account-row ${hasVacBan(account) ? 'vac-banned' : ''} ${state.selected?.id === account.id ? 'selected' : ''}" data-id="${account.id}">
+    <article class="account-row ${hasVacBan(account) ? 'vac-banned' : ''} ${state.selected?.id === account.id ? 'selected' : ''}" data-id="${account.id}" role="button" tabindex="0">
+      <label class="account-select"><input type="checkbox" data-select-account="${account.id}" ${state.selectedIds.has(account.id) ? 'checked' : ''} aria-label="${esc(`Account ${account.personaName || account.steamId} auswählen`)}"></label>
       <span class="avatar">${avatarMarkup(account)}</span>
       <span class="account-main"><span class="account-name">${esc(account.personaName || 'Unbekannter Account')} ${account.isPermaGreen ? '<span class="perma-badge">PERMA-GREEN</span>' : ''}</span><span class="account-meta">${esc(account.accountName || 'Anmeldename unbekannt')} · ${esc(account.steamId)} · ${primeName(account.prime)} · ${healthLabel(account.healthStatus)}</span>${hasVacBan(account) ? '<span class="account-login-warning vac-warning">VAC-Ban erkannt</span>' : ''}${account.loginRequiresReauthentication ? '<span class="account-login-warning">Steam-Login erneut erforderlich</span>' : ''}${account.cs2Owned === false ? '<span class="account-login-warning">CS2 nicht im Besitz</span>' : ''}${account.nextCooldownSeconds ? `<span class="account-next-cooldown">Nächster Cooldown: ${nextCooldownText(account)}</span>` : ''}</span>
       <span class="status-pill ${hasVacBan(account) ? 'vac' : account.loginRequiresReauthentication || sectionName(account.section) !== 'PlayReady' ? 'bad' : ''}">${hasVacBan(account) ? 'VAC-Ban' : account.loginRequiresReauthentication ? 'Login nötig' : sectionName(account.section) === 'PlayReady' ? 'Ready' : 'Nicht ready'}</span>
-    </button>`).join('') : '<div class="empty">Keine Accounts in dieser Kategorie.</div>';
-  document.querySelectorAll('.account-row').forEach(row => row.addEventListener('click', () => selectAccount(row.dataset.id)));
+    </article>`).join('') : '<div class="empty">Keine Accounts in dieser Kategorie.</div>';
+  document.querySelectorAll('.account-row').forEach(row => {
+    row.addEventListener('click', event => { if (!event.target.closest('[data-select-account]')) selectAccount(row.dataset.id); });
+    row.addEventListener('keydown', event => { if ((event.key === 'Enter' || event.key === ' ') && !event.target.closest('[data-select-account]')) { event.preventDefault(); selectAccount(row.dataset.id); } });
+  });
+  document.querySelectorAll('[data-select-account]').forEach(input => input.addEventListener('change', event => { const id = event.target.dataset.selectAccount; if (event.target.checked) state.selectedIds.add(id); else state.selectedIds.delete(id); renderBulkToolbar(); }));
+  renderBulkToolbar();
+}
+
+function renderBulkToolbar() {
+  const toolbar = $('bulkToolbar');
+  const count = state.selectedIds.size;
+  toolbar.classList.toggle('hidden', count === 0);
+  $('bulkSelectionCount').textContent = `${count} ausgewählt`;
+  $('bulkRunButton').disabled = count === 0;
+}
+
+async function runBulkCommand() {
+  const accountIds = Array.from(state.selectedIds);
+  if (!accountIds.length) return;
+  const command = Number($('bulkCommand').value);
+  let payload = null;
+  try {
+    if (command === 2) payload = await api('/api/settings/loadout');
+    if (command === 3) payload = await api('/api/settings/personalize');
+    const result = await api('/api/accounts/bulk-commands', { method: 'POST', body: JSON.stringify({ accountIds, command, payload }) });
+    const operations = result.operations || [];
+    $('bulkProgress').textContent = `0/${operations.length} abgeschlossen`;
+    let completed = 0;
+    const outcomes = await Promise.all(operations.map(async operation => {
+      let current = operation;
+      for (let attempt = 0; attempt < 180 && current.state < 2; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 700));
+        current = await api(`/api/operations/${operation.id}`);
+        $('bulkProgress').textContent = `${++completed}/${operations.length} abgeschlossen`;
+      }
+      return current;
+    }));
+    const succeeded = outcomes.filter(operation => operation.state === 2).length;
+    toast(`${succeeded}/${outcomes.length} Bulk-Aktionen abgeschlossen.`, succeeded !== outcomes.length);
+    state.selectedIds.clear();
+    await loadAccounts();
+  } catch (error) { $('bulkProgress').textContent = ''; toast(error.message, true); }
 }
 
 async function selectAccount(id, refreshList = true) {
@@ -583,6 +626,7 @@ $('loginForm').addEventListener('submit', async event => { event.preventDefault(
 document.querySelectorAll('.nav-item').forEach(item => item.addEventListener('click', () => setView(item.dataset.view)));
 $('refreshButton').addEventListener('click', () => state.view === 'play' || state.view === 'notplay' || state.view === 'vac' ? loadAccounts() : state.view === 'control' ? loadControl() : state.view === 'mail' ? loadMail() : state.view === 'authenticator' ? loadAuthenticators() : state.view === 'timeline' ? loadTimeline() : loadSettings());
 $('primeFilter').addEventListener('change', loadAccounts); $('accountSearch').addEventListener('input', renderAccounts);
+$('bulkRunButton').addEventListener('click', runBulkCommand); $('clearSelectionButton').addEventListener('click', () => { state.selectedIds.clear(); renderAccounts(); });
 $('focusButton').addEventListener('click', () => { state.focusMode = !state.focusMode; renderControl(); });
 $('refreshAllButton').addEventListener('click', loadControl);
 $('openTimelineButton').addEventListener('click', () => setView('timeline'));

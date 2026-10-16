@@ -57,6 +57,7 @@
         <div class="accounts-panel panel">
           <div class="panel-head"><div><h3>Accounts</h3><p id="accountCount" class="muted"></p></div><button id="addAccountButton" class="primary">Account hinzufügen</button></div>
           <div class="filters"><select id="primeFilter"><option value="">Prime und Non-Prime</option><option value="Prime">Prime</option><option value="NonPrime">Non-Prime</option><option value="Unknown">Unbekannt</option></select><input id="accountSearch" placeholder="Account suchen..."></div>
+          <div id="bulkToolbar" class="bulk-toolbar hidden"><span id="bulkSelectionCount">0 ausgewählt</span><select id="bulkCommand" aria-label="Bulk-Aktion"><option value="0">Status prüfen</option><option value="5">Loadout prüfen</option><option value="6">Matches laden</option><option value="1">Workshop leeren</option><option value="2">Loadout anwenden</option><option value="3">Personalize</option></select><button id="bulkRunButton" class="primary" type="button">Auswahl ausführen</button><button id="clearSelectionButton" class="ghost" type="button">Auswahl leeren</button><span id="bulkProgress" class="muted" role="status"></span></div>
           <div id="accountList" class="account-list"></div>
         </div>
         <div class="details-panel panel"><div id="emptyDetails" class="empty">Wähle einen Account aus.</div><div id="accountDetails" class="hidden"></div></div>

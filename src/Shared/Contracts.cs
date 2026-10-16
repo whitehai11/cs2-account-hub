@@ -254,6 +254,11 @@ public sealed record CommandRequest(
     AccountCommand Command,
     object? Payload = null);
 
+public sealed record BulkCommandRequest(
+    IReadOnlyList<Guid> AccountIds,
+    AccountCommand Command,
+    object? Payload = null);
+
 public sealed record SteamSignInHandoff(
     Guid OperationId,
     Guid AccountId,

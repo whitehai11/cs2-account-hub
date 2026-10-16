@@ -478,6 +478,51 @@ app.MapPost("/api/accounts/{id:guid}/commands", async (
     return Results.Accepted($"/api/operations/{operation.Id}", OperationMappings.ToDto(operation));
 });
 
+app.MapPost("/api/accounts/bulk-commands", async (
+    BulkCommandRequest request,
+    AccountStore accounts,
+    OperationStore operations,
+    OperationQueue queue) =>
+{
+    if (request.AccountIds is null || request.AccountIds.Count is < 1 or > 50)
+    {
+        return Results.BadRequest(new { message = "Maximal 50 Accounts können gleichzeitig ausgewählt werden." });
+    }
+
+    if (request.Command == AccountCommand.SignInToSteam || !RequestValidation.IsValidCommand(new CommandRequest(request.Command, request.Payload)))
+    {
+        return Results.BadRequest(new { message = "Diese Bulk-Aktion oder ihr Payload ist nicht erlaubt." });
+    }
+
+    var accountIds = request.AccountIds.Distinct().ToArray();
+    var selected = accountIds
+        .Select(accounts.Get)
+        .ToArray();
+    if (selected.Any(account => account is null))
+    {
+        return Results.NotFound(new { message = "Mindestens ein ausgewählter Account existiert nicht mehr." });
+    }
+
+    var blocked = selected
+        .Where(account => account!.MonitoringPaused || account.InMatch == true)
+        .Select(account => account!.Id)
+        .ToArray();
+    if (blocked.Length > 0)
+    {
+        return Results.Conflict(new { message = $"{blocked.Length} Accounts sind wegen Spielmodus oder pausiertem Monitoring blockiert." });
+    }
+
+    var queued = new List<OperationDto>(selected.Length);
+    foreach (var account in selected.OfType<AccountRecord>())
+    {
+        var operation = operations.Create(account.Id, request.Command, request.Payload);
+        await queue.EnqueueAsync(operation.Id);
+        queued.Add(OperationMappings.ToDto(operation));
+    }
+
+    return Results.Accepted("/api/operations", new { operations = queued });
+});
+
 app.MapGet("/api/{**path}", () => Results.NotFound());
 app.MapFallbackToFile("index.html");
 
