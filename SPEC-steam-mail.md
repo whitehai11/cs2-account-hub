@@ -39,6 +39,8 @@ Use environment variables or Docker secrets, never browser input or committed fi
 - `CS2_HUB_IMAP_PRIMARY_LABEL` (optional UI label, default `Steam`)
 - `CS2_HUB_IMAP_SECONDARY_LABEL` (optional UI label, default `Zweite Domain`)
 - `CS2_HUB_IMAP_SYNC_SECONDS` (bounded safe interval)
+- `CS2_HUB_IMAP_HOST_SECONDARY`, `CS2_HUB_IMAP_PORT_SECONDARY`, `CS2_HUB_IMAP_FOLDER_SECONDARY` (optional overrides; default to primary mailbox settings)
+- `CS2_HUB_IMAP_USERNAME_SECONDARY`, `CS2_HUB_IMAP_PASSWORD_SECONDARY` (optional second IMAP login)
 
 No account email address or Steam account mapping is stored.
 

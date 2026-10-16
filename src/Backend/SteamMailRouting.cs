@@ -17,8 +17,16 @@ internal static class SteamMailRouting
             .ToArray();
     }
 
-    public static string? ClassifySender(string sender)
+    public static string? ClassifySender(string sender, string? sourceGroupId = null)
     {
+        if (sourceGroupId is not null)
+        {
+            var sourceGroup = GetGroups().FirstOrDefault(group => group.Id == sourceGroupId);
+            return sourceGroup is not null && sourceGroup.Enabled && sourceGroup.Senders.Any(rule => Matches(sender, rule))
+                ? sourceGroup.Id
+                : null;
+        }
+
         foreach (var group in GetGroups().Where(group => group.Enabled))
         {
             if (group.Senders.Any(rule => Matches(sender, rule))) return group.Id;
@@ -33,12 +41,17 @@ internal static class SteamMailRouting
         if (primarySenders.Count == 0) primarySenders = DefaultPrimarySenders;
 
         var secondarySenders = ReadSenders("CS2_HUB_IMAP_SENDERS_SECONDARY");
+        if (secondarySenders.Count == 0) secondarySenders = DefaultPrimarySenders;
         return
         [
             new MailGroupConfig("primary", ReadLabel("CS2_HUB_IMAP_PRIMARY_LABEL", "Steam"), primarySenders, true),
-            new MailGroupConfig("secondary", ReadLabel("CS2_HUB_IMAP_SECONDARY_LABEL", "Zweite Domain"), secondarySenders, secondarySenders.Count > 0),
+            new MailGroupConfig("secondary", ReadLabel("CS2_HUB_IMAP_SECONDARY_LABEL", "Zweite Domain"), secondarySenders, IsSecondaryMailboxConfigured() || ReadSenders("CS2_HUB_IMAP_SENDERS_SECONDARY").Count > 0),
         ];
     }
+
+    private static bool IsSecondaryMailboxConfigured() =>
+        !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CS2_HUB_IMAP_USERNAME_SECONDARY")) &&
+        !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CS2_HUB_IMAP_PASSWORD_SECONDARY"));
 
     private static bool Matches(string sender, string rule)
     {

@@ -30,54 +30,13 @@ internal sealed class SteamMailService
 
         try
         {
-            var host = Environment.GetEnvironmentVariable("CS2_HUB_IMAP_HOST")!;
-            var port = ParsePort();
-            var username = Environment.GetEnvironmentVariable("CS2_HUB_IMAP_USERNAME")!;
-            var password = Environment.GetEnvironmentVariable("CS2_HUB_IMAP_PASSWORD")!;
-            var folderName = Environment.GetEnvironmentVariable("CS2_HUB_IMAP_FOLDER") ?? "INBOX";
-
-            using var client = new ImapClient();
-            await client.ConnectAsync(host, port, SecureSocketOptions.SslOnConnect, cancellationToken);
-            await client.AuthenticateAsync(username, password, cancellationToken);
-
-            var folder = await client.GetFolderAsync(folderName, cancellationToken);
-            await folder.OpenAsync(FolderAccess.ReadOnly, cancellationToken);
-            var since = DateTime.UtcNow.AddDays(-GetRetentionDays());
-            var uids = await folder.SearchAsync(SearchQuery.DeliveredAfter(since), cancellationToken);
-            var summaries = await folder.FetchAsync(uids, MessageSummaryItems.UniqueId | MessageSummaryItems.Envelope | MessageSummaryItems.BodyStructure | MessageSummaryItems.Flags | MessageSummaryItems.InternalDate, cancellationToken);
             var records = new List<SteamMailRecord>();
-
-            foreach (var summary in summaries.OrderByDescending(item => item.InternalDate ?? item.Envelope?.Date ?? DateTimeOffset.MinValue))
+            foreach (var mailbox in GetMailboxes())
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var sender = summary.Envelope?.From?.Mailboxes.FirstOrDefault()?.Address
-                    ?? summary.Envelope?.From?.FirstOrDefault()?.ToString()
-                    ?? "Unbekannter Absender";
-                var groupId = SteamMailRouting.ClassifySender(sender);
-                if (groupId is null) continue;
-
-                var body = await ReadTextBodyAsync(folder, summary, cancellationToken);
-                var subject = Normalize(summary.Envelope?.Subject, "(Ohne Betreff)", 300);
-                var receivedUtc = summary.InternalDate?.ToUniversalTime()
-                    ?? summary.Envelope?.Date?.ToUniversalTime()
-                    ?? DateTimeOffset.UtcNow;
-                var remoteKey = BuildRemoteKey(folder.FullName, summary);
-                records.Add(new SteamMailRecord
-                {
-                    Id = StableId(remoteKey),
-                    RemoteKey = remoteKey,
-                    Subject = subject,
-                    Sender = Normalize(sender, "Unbekannter Absender", 320),
-                    ReceivedUtc = receivedUtc,
-                    IsRead = summary.Flags?.HasFlag(MessageFlags.Seen) == true,
-                    Body = body,
-                    Preview = NormalizePreview(body),
-                    GroupId = groupId,
-                });
+                await SyncMailboxAsync(mailbox, records, cancellationToken);
             }
 
             _store.Merge(records);
-            await client.DisconnectAsync(true, cancellationToken);
             return true;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -86,6 +45,50 @@ internal sealed class SteamMailService
             _logger.LogWarning("Steam Mail sync failed ({ExceptionType}).", exception.GetType().Name);
             return false;
         }
+    }
+
+    private static async Task SyncMailboxAsync(MailboxConfig mailbox, ICollection<SteamMailRecord> records, CancellationToken cancellationToken)
+    {
+        using var client = new ImapClient();
+        await client.ConnectAsync(mailbox.Host, mailbox.Port, SecureSocketOptions.SslOnConnect, cancellationToken);
+        await client.AuthenticateAsync(mailbox.Username, mailbox.Password, cancellationToken);
+
+        var folder = await client.GetFolderAsync(mailbox.Folder, cancellationToken);
+        await folder.OpenAsync(FolderAccess.ReadOnly, cancellationToken);
+        var since = DateTime.UtcNow.AddDays(-GetRetentionDays());
+        var uids = await folder.SearchAsync(SearchQuery.DeliveredAfter(since), cancellationToken);
+        var summaries = await folder.FetchAsync(uids, MessageSummaryItems.UniqueId | MessageSummaryItems.Envelope | MessageSummaryItems.BodyStructure | MessageSummaryItems.Flags | MessageSummaryItems.InternalDate, cancellationToken);
+
+        foreach (var summary in summaries.OrderByDescending(item => item.InternalDate ?? item.Envelope?.Date ?? DateTimeOffset.MinValue))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var sender = summary.Envelope?.From?.Mailboxes.FirstOrDefault()?.Address
+                ?? summary.Envelope?.From?.FirstOrDefault()?.ToString()
+                ?? "Unbekannter Absender";
+            var groupId = SteamMailRouting.ClassifySender(sender, mailbox.GroupId);
+            if (groupId is null) continue;
+
+            var body = await ReadTextBodyAsync(folder, summary, cancellationToken);
+            var subject = Normalize(summary.Envelope?.Subject, "(Ohne Betreff)", 300);
+            var receivedUtc = summary.InternalDate?.ToUniversalTime()
+                ?? summary.Envelope?.Date?.ToUniversalTime()
+                ?? DateTimeOffset.UtcNow;
+            var remoteKey = BuildRemoteKey(mailbox.GroupId, folder.FullName, summary);
+            records.Add(new SteamMailRecord
+            {
+                Id = StableId(remoteKey),
+                RemoteKey = remoteKey,
+                Subject = subject,
+                Sender = Normalize(sender, "Unbekannter Absender", 320),
+                ReceivedUtc = receivedUtc,
+                IsRead = summary.Flags?.HasFlag(MessageFlags.Seen) == true,
+                Body = body,
+                Preview = NormalizePreview(body),
+                GroupId = groupId,
+            });
+        }
+
+        await client.DisconnectAsync(true, cancellationToken);
     }
 
     private static async Task<string> ReadTextBodyAsync(IMailFolder folder, IMessageSummary summary, CancellationToken cancellationToken)
@@ -115,8 +118,8 @@ internal sealed class SteamMailService
         return string.IsNullOrWhiteSpace(normalized) ? fallback : normalized.Length > maxLength ? normalized[..maxLength] : normalized;
     }
 
-    private static string BuildRemoteKey(string folderName, IMessageSummary summary) =>
-        $"{folderName}:{summary.UniqueId.Id}:{summary.Envelope?.MessageId ?? summary.Envelope?.Date?.ToUnixTimeSeconds().ToString() ?? "unknown"}";
+    private static string BuildRemoteKey(string mailboxGroupId, string folderName, IMessageSummary summary) =>
+        $"{mailboxGroupId}:{folderName}:{summary.UniqueId.Id}:{summary.Envelope?.MessageId ?? summary.Envelope?.Date?.ToUnixTimeSeconds().ToString() ?? "unknown"}";
 
     private static Guid StableId(string value)
     {
@@ -124,15 +127,43 @@ internal sealed class SteamMailService
         return new Guid(bytes[..16]);
     }
 
-    private static int ParsePort() =>
-        int.TryParse(Environment.GetEnvironmentVariable("CS2_HUB_IMAP_PORT"), out var port)
+    private static int ParsePort(string variable, int fallback = 993) =>
+        int.TryParse(Environment.GetEnvironmentVariable(variable), out var port)
             ? Math.Clamp(port, 1, 65535)
-            : 993;
+            : fallback;
+
+    private static IReadOnlyList<MailboxConfig> GetMailboxes()
+    {
+        var primaryHost = Environment.GetEnvironmentVariable("CS2_HUB_IMAP_HOST")!;
+        var primaryPort = ParsePort("CS2_HUB_IMAP_PORT");
+        var primaryFolder = Environment.GetEnvironmentVariable("CS2_HUB_IMAP_FOLDER") ?? "INBOX";
+        var mailboxes = new List<MailboxConfig>
+        {
+            new("primary", primaryHost, primaryPort, Environment.GetEnvironmentVariable("CS2_HUB_IMAP_USERNAME")!, Environment.GetEnvironmentVariable("CS2_HUB_IMAP_PASSWORD")!, primaryFolder),
+        };
+
+        var secondaryUsername = Environment.GetEnvironmentVariable("CS2_HUB_IMAP_USERNAME_SECONDARY");
+        var secondaryPassword = Environment.GetEnvironmentVariable("CS2_HUB_IMAP_PASSWORD_SECONDARY");
+        if (!string.IsNullOrWhiteSpace(secondaryUsername) && !string.IsNullOrWhiteSpace(secondaryPassword))
+        {
+            mailboxes.Add(new MailboxConfig(
+                "secondary",
+                Environment.GetEnvironmentVariable("CS2_HUB_IMAP_HOST_SECONDARY") ?? primaryHost,
+                ParsePort("CS2_HUB_IMAP_PORT_SECONDARY", primaryPort),
+                secondaryUsername,
+                secondaryPassword,
+                Environment.GetEnvironmentVariable("CS2_HUB_IMAP_FOLDER_SECONDARY") ?? primaryFolder));
+        }
+
+        return mailboxes;
+    }
 
     private static int GetRetentionDays() =>
         int.TryParse(Environment.GetEnvironmentVariable("CS2_HUB_IMAP_RETENTION_DAYS"), out var days)
             ? Math.Clamp(days, 1, 365)
             : 30;
+
+    private sealed record MailboxConfig(string GroupId, string Host, int Port, string Username, string Password, string Folder);
 }
 
 internal sealed class SteamMailSyncWorker : BackgroundService
