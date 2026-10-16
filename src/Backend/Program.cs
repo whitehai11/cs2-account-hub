@@ -980,7 +980,6 @@ internal sealed class AuthSessionStore
     private async Task RunAsync(AuthSessionRecord session, ISteamAccountGateway gateway, AccountStore accounts)
     {
         var stopwatch = Stopwatch.StartNew();
-        var stage = "credentials";
         _logger.LogInformation("Steam auth session {SessionId} started.", session.Id);
 
         try
@@ -1001,24 +1000,17 @@ internal sealed class AuthSessionStore
                 PersonaName = result.AccountName,
                 ProtectedRefreshToken = _tokens.Protect(result.RefreshToken),
                 LastLoginUtc = DateTimeOffset.UtcNow,
+                HealthStatus = "status-pending",
+                NextCheckUtc = DateTimeOffset.UtcNow.AddMinutes(10),
             };
 
-            stage = "status";
-            var status = await gateway.QueryStatusAsync(result.RefreshToken, result.SteamId, session.CancellationToken.Token);
-            _logger.LogInformation("Steam auth session {SessionId} status loaded after {ElapsedMs} ms.", session.Id, stopwatch.ElapsedMilliseconds);
-
-            stage = "prime";
-            account.ApplyStatus(status, await gateway.QueryPrimeAsync(result.RefreshToken, result.SteamId, status, session.CancellationToken.Token));
-            _logger.LogInformation("Steam auth session {SessionId} prime status loaded after {ElapsedMs} ms.", session.Id, stopwatch.ElapsedMilliseconds);
-
-            stage = "profile";
-            account.ApplyProfile(await gateway.QueryProfileAsync(result.SteamId, session.CancellationToken.Token));
-            account.StatusUpdatedUtc = DateTimeOffset.UtcNow;
             accounts.Upsert(account);
             _events.Append(account.Id, "account", "Account verbunden", $"{account.PersonaName ?? account.SteamId} wurde serverseitig hinzugefügt.", "success");
 
             session.State = AuthState.Completed;
-            session.PromptMessage = "Account authenticated and status loaded.";
+            session.PromptMessage = "Account authenticated. Status check is running in the background.";
+
+            await EnrichAccountAsync(session, account, result.RefreshToken, gateway, accounts);
         }
         catch (OperationCanceledException)
         {
@@ -1030,25 +1022,67 @@ internal sealed class AuthSessionStore
             session.State = AuthState.Failed;
             session.PromptMessage = "Steam authentication failed. Check the account details and try again.";
 
+            _logger.LogWarning(
+                "Steam auth session {SessionId} failed during credentials after {ElapsedMs} ms with {ExceptionType}.",
+                session.Id,
+                stopwatch.ElapsedMilliseconds,
+                exception.GetType().Name);
+        }
+    }
+
+    private async Task EnrichAccountAsync(AuthSessionRecord session, AccountRecord account, string refreshToken, ISteamAccountGateway gateway, AccountStore accounts)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            var status = await gateway.QueryStatusAsync(refreshToken, account.SteamId, session.CancellationToken.Token);
+            account.ApplyStatus(status);
+            account.StatusUpdatedUtc = DateTimeOffset.UtcNow;
+            accounts.Upsert(account);
+            _logger.LogInformation("Steam auth session {SessionId} status loaded after {ElapsedMs} ms.", session.Id, stopwatch.ElapsedMilliseconds);
+
+            var prime = await gateway.QueryPrimeAsync(refreshToken, account.SteamId, status, session.CancellationToken.Token);
+            account.ApplyStatus(status, prime);
+            account.StatusUpdatedUtc = DateTimeOffset.UtcNow;
+            accounts.Upsert(account);
+            _logger.LogInformation("Steam auth session {SessionId} prime status loaded after {ElapsedMs} ms.", session.Id, stopwatch.ElapsedMilliseconds);
+
+            account.ApplyProfile(await gateway.QueryProfileAsync(account.SteamId, session.CancellationToken.Token));
+            accounts.Upsert(account);
+        }
+        catch (OperationCanceledException) when (session.CancellationToken.IsCancellationRequested)
+        {
+            MarkEnrichmentPending(account, accounts, "OperationCanceledException");
+            _logger.LogWarning("Steam auth session {SessionId} background status enrichment was cancelled after {ElapsedMs} ms.", session.Id, stopwatch.ElapsedMilliseconds);
+        }
+        catch (Exception exception)
+        {
+            MarkEnrichmentPending(account, accounts, exception.GetType().Name);
             if (exception is NfaLoader.Services.SteamCmException cmException)
             {
                 _logger.LogWarning(
-                    "Steam auth session {SessionId} failed during {Stage} after {ElapsedMs} ms with Steam result {SteamResult}.",
+                    "Steam auth session {SessionId} background status enrichment failed after {ElapsedMs} ms with Steam result {SteamResult}.",
                     session.Id,
-                    stage,
                     stopwatch.ElapsedMilliseconds,
                     cmException.Result);
             }
             else
             {
                 _logger.LogWarning(
-                    "Steam auth session {SessionId} failed during {Stage} after {ElapsedMs} ms with {ExceptionType}.",
+                    "Steam auth session {SessionId} background status enrichment failed after {ElapsedMs} ms with {ExceptionType}.",
                     session.Id,
-                    stage,
                     stopwatch.ElapsedMilliseconds,
                     exception.GetType().Name);
             }
         }
+    }
+
+    private static void MarkEnrichmentPending(AccountRecord account, AccountStore accounts, string errorType)
+    {
+        account.HealthStatus = "status-pending";
+        account.LastCheckError = errorType;
+        account.NextCheckUtc = DateTimeOffset.UtcNow.AddMinutes(1);
+        accounts.Upsert(account);
     }
 
     private async Task<string?> WaitForGuardAsync(AuthSessionRecord session, NfaLoader.Services.SteamGuardPrompt prompt, CancellationToken cancellationToken)
@@ -1255,7 +1289,7 @@ internal static class OperationMappings
 internal static class AccountMappings
 {
     public static AccountSummaryDto ToSummary(AccountRecord account) => new(
-        account.Id, account.SteamId, account.PersonaName, account.AvatarUrl, account.Prime, account.Section,
+        account.Id, account.AccountName, account.SteamId, account.PersonaName, account.AvatarUrl, account.Prime, account.Section,
         account.PremierRating, account.Cs2Level, account.LastLoginUtc, account.CooldownSeconds,
         account.CooldownReason, account.VacBanned, account.Note, account.StatusUpdatedUtc, account.CooldownEndsUtc)
     {
@@ -1272,7 +1306,7 @@ internal static class AccountMappings
     };
 
     public static AccountDetailDto ToDetail(AccountRecord account) => new(
-        account.Id, account.SteamId, account.PersonaName, account.AvatarUrl, account.Prime, account.Section,
+        account.Id, account.AccountName, account.SteamId, account.PersonaName, account.AvatarUrl, account.Prime, account.Section,
         account.PremierRating, account.PremierWins, account.Cs2Level, account.LastLoginUtc,
         account.CooldownSeconds, account.CooldownReason, account.VacBanned, account.Note, account.StatusUpdatedUtc, account.CooldownEndsUtc)
     {

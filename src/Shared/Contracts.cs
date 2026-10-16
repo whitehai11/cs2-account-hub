@@ -42,14 +42,15 @@ public enum AuthState
 
 public sealed class AccountSummaryDto
 {
-    public AccountSummaryDto(Guid id, string steamId, string? personaName, string? avatarUrl, AccountPrimeBucket prime, AccountSection section, int? premierRating, int? cs2Level, DateTimeOffset? lastLoginUtc, uint? cooldownSeconds, uint? cooldownReason, bool? vacBanned, string? note, DateTimeOffset? statusUpdatedUtc, DateTimeOffset? cooldownEndsUtc = null)
+    public AccountSummaryDto(Guid id, string? accountName, string steamId, string? personaName, string? avatarUrl, AccountPrimeBucket prime, AccountSection section, int? premierRating, int? cs2Level, DateTimeOffset? lastLoginUtc, uint? cooldownSeconds, uint? cooldownReason, bool? vacBanned, string? note, DateTimeOffset? statusUpdatedUtc, DateTimeOffset? cooldownEndsUtc = null)
     {
-        Id = id; SteamId = steamId; PersonaName = personaName; AvatarUrl = avatarUrl; Prime = prime; Section = section;
+        Id = id; AccountName = accountName; SteamId = steamId; PersonaName = personaName; AvatarUrl = avatarUrl; Prime = prime; Section = section;
         PremierRating = premierRating; Cs2Level = cs2Level; LastLoginUtc = lastLoginUtc; CooldownSeconds = cooldownSeconds;
         CooldownReason = cooldownReason; VacBanned = vacBanned; Note = note; StatusUpdatedUtc = statusUpdatedUtc; CooldownEndsUtc = cooldownEndsUtc;
     }
 
     public Guid Id { get; set; }
+    public string? AccountName { get; set; }
     public string SteamId { get; set; }
     public string? PersonaName { get; set; }
     public string? AvatarUrl { get; set; }
@@ -78,14 +79,15 @@ public sealed class AccountSummaryDto
 
 public sealed class AccountDetailDto
 {
-    public AccountDetailDto(Guid id, string steamId, string? personaName, string? avatarUrl, AccountPrimeBucket prime, AccountSection section, int? premierRating, int? premierWins, int? cs2Level, DateTimeOffset? lastLoginUtc, uint? cooldownSeconds, uint? cooldownReason, bool? vacBanned, string? note, DateTimeOffset? statusUpdatedUtc, DateTimeOffset? cooldownEndsUtc = null)
+    public AccountDetailDto(Guid id, string? accountName, string steamId, string? personaName, string? avatarUrl, AccountPrimeBucket prime, AccountSection section, int? premierRating, int? premierWins, int? cs2Level, DateTimeOffset? lastLoginUtc, uint? cooldownSeconds, uint? cooldownReason, bool? vacBanned, string? note, DateTimeOffset? statusUpdatedUtc, DateTimeOffset? cooldownEndsUtc = null)
     {
-        Id = id; SteamId = steamId; PersonaName = personaName; AvatarUrl = avatarUrl; Prime = prime; Section = section;
+        Id = id; AccountName = accountName; SteamId = steamId; PersonaName = personaName; AvatarUrl = avatarUrl; Prime = prime; Section = section;
         PremierRating = premierRating; PremierWins = premierWins; Cs2Level = cs2Level; LastLoginUtc = lastLoginUtc;
         CooldownSeconds = cooldownSeconds; CooldownReason = cooldownReason; VacBanned = vacBanned; Note = note; StatusUpdatedUtc = statusUpdatedUtc; CooldownEndsUtc = cooldownEndsUtc;
     }
 
     public Guid Id { get; set; }
+    public string? AccountName { get; set; }
     public string SteamId { get; set; }
     public string? PersonaName { get; set; }
     public string? AvatarUrl { get; set; }
