@@ -148,15 +148,20 @@ internal sealed class SteamMailService
         {
             mailboxes.Add(new MailboxConfig(
                 "secondary",
-                Environment.GetEnvironmentVariable("CS2_HUB_IMAP_HOST_SECONDARY") ?? primaryHost,
+                ReadOptional("CS2_HUB_IMAP_HOST_SECONDARY", primaryHost),
                 ParsePort("CS2_HUB_IMAP_PORT_SECONDARY", primaryPort),
                 secondaryUsername,
                 secondaryPassword,
-                Environment.GetEnvironmentVariable("CS2_HUB_IMAP_FOLDER_SECONDARY") ?? primaryFolder));
+                ReadOptional("CS2_HUB_IMAP_FOLDER_SECONDARY", primaryFolder)));
         }
 
         return mailboxes;
     }
+
+    private static string ReadOptional(string variable, string fallback) =>
+        string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(variable))
+            ? fallback
+            : Environment.GetEnvironmentVariable(variable)!;
 
     private static int GetRetentionDays() =>
         int.TryParse(Environment.GetEnvironmentVariable("CS2_HUB_IMAP_RETENTION_DAYS"), out var days)
