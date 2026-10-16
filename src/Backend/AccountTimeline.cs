@@ -1,4 +1,5 @@
 using System.Text.Json;
+using CS2AccountHub.Contracts;
 
 internal sealed class AccountEventStore
 {
