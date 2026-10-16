@@ -152,7 +152,7 @@ internal sealed class ExportBackupService
 
     private static string Csv(object? value)
     {
-        var text = value ?? string.Empty;
+        var text = value?.ToString() ?? string.Empty;
         return $"\"{text.Replace("\"", "\"\"")}\"";
     }
 }
