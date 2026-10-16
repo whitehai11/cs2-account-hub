@@ -30,6 +30,7 @@ builder.Services.AddSingleton<SteamAuthenticatorCodeService>();
 builder.Services.AddSingleton<SteamAuthenticatorStore>();
 builder.Services.AddSingleton<WebSessionService>();
 builder.Services.AddSingleton<SteamPublicProfileService>();
+builder.Services.AddSingleton<SteamBanService>();
 builder.Services.AddSingleton<ISteamAccountGateway, SteamGateway>();
 builder.Services.AddHostedService<OperationWorker>();
 builder.Services.AddHostedService<AccountCheckScheduler>();
@@ -841,16 +842,20 @@ internal sealed class OperationWorker : BackgroundService
     private readonly OperationStore _operations;
     private readonly AccountStore _accounts;
     private readonly ISteamAccountGateway _gateway;
+    private readonly TokenProtector _tokens;
+    private readonly SteamBanService _steamBans;
     private readonly DiscordWebhookNotifier _notifier;
     private readonly AccountEventStore _events;
     private readonly ILogger<OperationWorker> _logger;
 
-    public OperationWorker(OperationQueue queue, OperationStore operations, AccountStore accounts, ISteamAccountGateway gateway, DiscordWebhookNotifier notifier, AccountEventStore events, ILogger<OperationWorker> logger)
+    public OperationWorker(OperationQueue queue, OperationStore operations, AccountStore accounts, ISteamAccountGateway gateway, TokenProtector tokens, SteamBanService steamBans, DiscordWebhookNotifier notifier, AccountEventStore events, ILogger<OperationWorker> logger)
     {
         _queue = queue;
         _operations = operations;
         _accounts = accounts;
         _gateway = gateway;
+        _tokens = tokens;
+        _steamBans = steamBans;
         _notifier = notifier;
         _events = events;
         _logger = logger;
@@ -879,6 +884,23 @@ internal sealed class OperationWorker : BackgroundService
                 previousLoadoutMismatches = account.LoadoutMismatchCount;
                 previousCooldownActive = account.CooldownSeconds is > 0 || account.CooldownEndsUtc > DateTimeOffset.UtcNow;
                 previousCooldownNotificationSent = account.CooldownNotificationSent;
+
+                if (operation.Command == AccountCommand.RefreshStatus)
+                {
+                    var ownership = await QueryOwnershipIfNeededAsync(account, stoppingToken);
+                    if (ownership is not null)
+                    {
+                        account.ApplyCs2Ownership(ownership);
+                        _accounts.Upsert(account);
+                    }
+
+                    var steamBans = await _steamBans.QueryAsync(account.SteamId, stoppingToken);
+                    if (steamBans is not null)
+                    {
+                        account.ApplySteamBans(steamBans);
+                        _accounts.Upsert(account);
+                    }
+                }
 
                 var result = await _gateway.ExecuteAsync(account, operation.Command, operation.Payload, stoppingToken);
                 if (result.Status is not null)
@@ -998,6 +1020,26 @@ internal sealed class OperationWorker : BackgroundService
         }
     }
 
+    private async Task<SteamGameOwnershipSnapshot?> QueryOwnershipIfNeededAsync(AccountRecord account, CancellationToken cancellationToken)
+    {
+        if (account.Cs2Owned is true || string.IsNullOrWhiteSpace(account.ProtectedRefreshToken)) return null;
+
+        try
+        {
+            var refreshToken = _tokens.Unprotect(account.ProtectedRefreshToken);
+            return await _gateway.QueryOwnershipAsync(refreshToken, account.SteamId, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogDebug("CS2 ownership check failed for account {AccountId} with {ExceptionType}.", account.Id, exception.GetType().Name);
+            return null;
+        }
+    }
+
     private async Task NotifyEventAsync(AccountRecord account, string title, string description, int color, CancellationToken cancellationToken)
     {
         if (!_notifier.IsConfigured) return;
@@ -1046,6 +1088,11 @@ internal interface ISteamAccountGateway
         CancellationToken cancellationToken);
 
     Task<NfaLoader.Models.CsPremierScoreResult> QueryStatusAsync(
+        string refreshToken,
+        string steamId,
+        CancellationToken cancellationToken);
+
+    Task<SteamGameOwnershipSnapshot?> QueryOwnershipAsync(
         string refreshToken,
         string steamId,
         CancellationToken cancellationToken);
@@ -1196,6 +1243,13 @@ internal sealed class AuthSessionStore
         var stopwatch = Stopwatch.StartNew();
         try
         {
+            var ownership = await gateway.QueryOwnershipAsync(refreshToken, account.SteamId, session.CancellationToken.Token);
+            if (ownership is not null)
+            {
+                account.ApplyCs2Ownership(ownership);
+                accounts.Upsert(account);
+            }
+
             var status = await gateway.QueryStatusAsync(refreshToken, account.SteamId, session.CancellationToken.Token);
             account.ApplyStatus(status);
             account.StatusUpdatedUtc = DateTimeOffset.UtcNow;
@@ -1351,6 +1405,15 @@ internal sealed class AccountRecord
     public bool CooldownNotificationSent { get; set; }
     public uint? CooldownReason { get; set; }
     public bool? VacBanned { get; set; }
+    public bool? Cs2Owned { get; set; }
+    public DateTimeOffset? Cs2OwnershipCheckedUtc { get; set; }
+    public bool? SteamGameBanned { get; set; }
+    public int? SteamGameBanCount { get; set; }
+    public bool? SteamVacBanned { get; set; }
+    public int? SteamVacBanCount { get; set; }
+    public bool? SteamCommunityBanned { get; set; }
+    public string? SteamEconomyBan { get; set; }
+    public DateTimeOffset? SteamBansCheckedUtc { get; set; }
     public string? Note { get; set; }
     public bool IsPermaGreen { get; set; }
     public bool MonitoringPaused { get; set; }
@@ -1388,6 +1451,14 @@ internal sealed class AccountRecord
         HealthStatus = status.HasCooldownData ? "healthy" : "gc-unknown";
         LastCheckError = null;
 
+        // A successful CS2 GC response proves that the account currently has access to AppID 730.
+        // This also repairs a stale/lagging storefront ownership result after the license changes.
+        if (status.HasCooldownData)
+        {
+            Cs2Owned = true;
+            Cs2OwnershipCheckedUtc = now;
+        }
+
         if (PremierRating is { } rating)
         {
             if (RatingHistory.Count == 0 || RatingHistory[^1].Rating != rating || now - RatingHistory[^1].CapturedUtc >= TimeSpan.FromMinutes(10))
@@ -1418,9 +1489,44 @@ internal sealed class AccountRecord
         if (prime is not null && prime != AccountPrimeBucket.Unknown) Prime = prime.Value;
         else if (Prime == AccountPrimeBucket.Unknown && status.HasPremierScore) Prime = AccountPrimeBucket.Prime;
 
-        Section = status.HasCooldownData && !status.HasCooldown && status.GcVacBannedOrUnknown is false
+        Section = status.HasCooldownData && !status.HasCooldown && status.GcVacBannedOrUnknown is false && Cs2Owned is not false && SteamGameBanned is not true
             ? AccountSection.PlayReady
             : AccountSection.NotPlayReady;
+    }
+
+    public void ApplyCs2Ownership(SteamGameOwnershipSnapshot ownership)
+    {
+        Cs2Owned = ownership.OwnsCs2;
+        Cs2OwnershipCheckedUtc = ownership.CheckedUtc;
+
+        if (!ownership.OwnsCs2)
+        {
+            Section = AccountSection.NotPlayReady;
+        }
+        else if (CooldownVerifiedUtc is not null && CooldownSeconds is 0 && VacBanned is false && SteamGameBanned is not true)
+        {
+            Section = AccountSection.PlayReady;
+        }
+    }
+
+    public void ApplySteamBans(SteamBanSnapshot bans)
+    {
+        SteamGameBanned = bans.GameBanned;
+        SteamGameBanCount = bans.NumberOfGameBans;
+        SteamVacBanned = bans.VacBanned;
+        SteamVacBanCount = bans.NumberOfVACBans;
+        SteamCommunityBanned = bans.CommunityBanned;
+        SteamEconomyBan = bans.EconomyBan;
+        SteamBansCheckedUtc = bans.CheckedUtc;
+
+        if (bans.GameBanned)
+        {
+            Section = AccountSection.NotPlayReady;
+        }
+        else if (CooldownVerifiedUtc is not null && CooldownSeconds is 0 && VacBanned is false)
+        {
+            Section = AccountSection.PlayReady;
+        }
     }
 
     public void ApplyProfile(SteamProfileSnapshot? profile)
@@ -1483,6 +1589,15 @@ internal static class AccountMappings
         LoadoutCheckedUtc = account.LoadoutCheckedUtc,
         IsPermaGreen = account.IsPermaGreen,
         MonitoringPaused = account.MonitoringPaused,
+        Cs2Owned = account.Cs2Owned,
+        Cs2OwnershipCheckedUtc = account.Cs2OwnershipCheckedUtc,
+        SteamGameBanned = account.SteamGameBanned,
+        SteamGameBanCount = account.SteamGameBanCount,
+        SteamVacBanned = account.SteamVacBanned,
+        SteamVacBanCount = account.SteamVacBanCount,
+        SteamCommunityBanned = account.SteamCommunityBanned,
+        SteamEconomyBan = account.SteamEconomyBan,
+        SteamBansCheckedUtc = account.SteamBansCheckedUtc,
     };
 
     public static AccountDetailDto ToDetail(AccountRecord account) => new(
@@ -1507,5 +1622,14 @@ internal static class AccountMappings
         RatingHistory = account.RatingHistory,
         IsPermaGreen = account.IsPermaGreen,
         MonitoringPaused = account.MonitoringPaused,
+        Cs2Owned = account.Cs2Owned,
+        Cs2OwnershipCheckedUtc = account.Cs2OwnershipCheckedUtc,
+        SteamGameBanned = account.SteamGameBanned,
+        SteamGameBanCount = account.SteamGameBanCount,
+        SteamVacBanned = account.SteamVacBanned,
+        SteamVacBanCount = account.SteamVacBanCount,
+        SteamCommunityBanned = account.SteamCommunityBanned,
+        SteamEconomyBan = account.SteamEconomyBan,
+        SteamBansCheckedUtc = account.SteamBansCheckedUtc,
     };
 }

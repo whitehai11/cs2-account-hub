@@ -20,6 +20,8 @@ The dashboard uses a four-hour, `HttpOnly`, `Secure`, `SameSite=Strict` session 
 
 The classification is deliberately conservative: an account is `PlayReady` only when the GC returned cooldown data, VAC is explicitly clear and no cooldown is active. Unknown status stays `NotPlayReady` until a refresh confirms it.
 
+CS2 ownership is checked separately through the authenticated Steam storefront session for AppID 730. If Steam reports that the account does not own CS2, the account is kept `NotPlayReady` and shown explicitly as `CS2 nicht im Besitz`, even when the GC itself only returns a timeout. Optional Steam Web API ban data is enabled by `CS2_HUB_STEAM_API_KEY`; without that key the ban fields remain `Nicht geprüft`.
+
 ## Build
 
 The repository needs the .NET 8 SDK for development. The current Codex host only has the .NET runtime installed, so compilation must be done on a machine or CI runner with the SDK, or through Docker.
@@ -31,6 +33,8 @@ dotnet build .\CS2AccountHub.sln
 ```bash
 cat > .env <<'EOF'
 CS2_HUB_API_KEY=replace-with-a-long-random-value
+# Optional Steam Web API key for Game-Ban/VAC/Community-Ban checks
+CS2_HUB_STEAM_API_KEY=replace-with-steam-web-api-key
 CS2_HUB_WEB_USERNAME=admin
 CS2_HUB_WEB_PASSWORD=replace-with-a-long-dashboard-password
 # Optional global Steam Mail inbox (IMAP over TLS; never put these in the browser)

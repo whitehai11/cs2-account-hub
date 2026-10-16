@@ -72,6 +72,15 @@ public sealed class AccountSummaryDto
     public DateTimeOffset? LoadoutCheckedUtc { get; set; }
     public uint? CooldownReason { get; set; }
     public bool? VacBanned { get; set; }
+    public bool? Cs2Owned { get; set; }
+    public DateTimeOffset? Cs2OwnershipCheckedUtc { get; set; }
+    public bool? SteamGameBanned { get; set; }
+    public int? SteamGameBanCount { get; set; }
+    public bool? SteamVacBanned { get; set; }
+    public int? SteamVacBanCount { get; set; }
+    public bool? SteamCommunityBanned { get; set; }
+    public string? SteamEconomyBan { get; set; }
+    public DateTimeOffset? SteamBansCheckedUtc { get; set; }
     public string? Note { get; set; }
     public DateTimeOffset? StatusUpdatedUtc { get; set; }
     public bool IsPermaGreen { get; set; }
@@ -117,6 +126,15 @@ public sealed class AccountDetailDto
     public IReadOnlyList<RatingPointDto> RatingHistory { get; set; } = Array.Empty<RatingPointDto>();
     public uint? CooldownReason { get; set; }
     public bool? VacBanned { get; set; }
+    public bool? Cs2Owned { get; set; }
+    public DateTimeOffset? Cs2OwnershipCheckedUtc { get; set; }
+    public bool? SteamGameBanned { get; set; }
+    public int? SteamGameBanCount { get; set; }
+    public bool? SteamVacBanned { get; set; }
+    public int? SteamVacBanCount { get; set; }
+    public bool? SteamCommunityBanned { get; set; }
+    public string? SteamEconomyBan { get; set; }
+    public DateTimeOffset? SteamBansCheckedUtc { get; set; }
     public string? Note { get; set; }
     public DateTimeOffset? StatusUpdatedUtc { get; set; }
     public bool IsPermaGreen { get; set; }

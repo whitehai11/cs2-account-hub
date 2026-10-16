@@ -23,6 +23,25 @@ function primeName(value) { return enumName(value, ['Unknown', 'Prime', 'NonPrim
 function sectionName(value) { return enumName(value, ['PlayReady', 'NotPlayReady']) || 'NotPlayReady'; }
 function healthLabel(value) { return value === 'healthy' ? 'GC gesund' : value === 'gc-unknown' ? 'GC unvollständig' : value === 'login-required' ? 'Steam-Login erneut erforderlich' : value?.startsWith('error:') ? 'GC-Fehler' : 'Noch nicht geprüft'; }
 function presenceLabel(account) { return account.inMatch === true ? 'In CS2-Match' : account.inMatch === false ? 'Nicht im Match' : 'Unbekannt'; }
+function steamBanText(account) {
+  if (!account.steamBansCheckedUtc) return 'Nicht geprüft';
+  const game = account.steamGameBanned === true ? `Game-Ban (${account.steamGameBanCount ?? 0})` : account.steamGameBanned === false ? 'Game-Ban: Nein' : 'Game-Ban: Unbekannt';
+  const vac = account.steamVacBanned === true ? 'Steam-VAC: Ja' : account.steamVacBanned === false ? 'Steam-VAC: Nein' : 'Steam-VAC: Unbekannt';
+  return `${game} · ${vac}`;
+}
+function cs2OwnershipText(account) {
+  if (!account.cs2OwnershipCheckedUtc) return 'Nicht geprüft';
+  return account.cs2Owned === true ? 'Ja' : account.cs2Owned === false ? 'Nein · CS2 nicht im Besitz' : 'Unbekannt';
+}
+function readinessReason(account) {
+  if (account.loginRequiresReauthentication) return 'Steam-Login erneut erforderlich';
+  if (account.cs2Owned === false) return 'CS2 nicht im Besitz';
+  if (account.steamGameBanned === true) return 'Steam Game-Ban';
+  if (account.vacBanned === true) return 'GC meldet VAC-Ban';
+  if (remainingSeconds(account) > 0) return 'Cooldown aktiv';
+  if (account.healthStatus && account.healthStatus !== 'healthy') return healthLabel(account.healthStatus);
+  return sectionName(account.section) === 'PlayReady' ? 'Bereit' : 'Nicht bestätigt';
+}
 function formatDate(value) { return value ? new Date(value).toLocaleString('de-DE') : '—'; }
 function relativeTime(value, now = Date.now()) {
   if (!value) return '—';
@@ -103,6 +122,8 @@ function avatarMarkup(account, size = '') {
     : `<span class="avatar-fallback ${size}">${esc((account.personaName || '?').slice(0, 1).toUpperCase())}</span>`;
 }
 function accountAttention(account) {
+  if (account.steamGameBanned === true) return ['critical', 'Game-Ban', 'Steam-Ban erkannt'];
+  if (account.cs2Owned === false) return ['critical', 'CS2 nicht im Besitz', 'Spielzugriff fehlt'];
   if (account.vacBanned === true) return ['critical', 'VAC-Status', 'Sofort prüfen'];
   if (account.loginRequiresReauthentication) return ['critical', 'Steam-Login abgelaufen', 'Neu anmelden'];
   if (remainingSeconds(account) > 0) return ['warning', 'Cooldown aktiv', duration(account)];
@@ -213,7 +234,7 @@ function renderAccounts() {
   $('accountList').innerHTML = list.length ? list.map(account => `
     <button class="account-row ${state.selected?.id === account.id ? 'selected' : ''}" data-id="${account.id}">
       <span class="avatar">${avatarMarkup(account)}</span>
-      <span class="account-main"><span class="account-name">${esc(account.personaName || 'Unbekannter Account')} ${account.isPermaGreen ? '<span class="perma-badge">PERMA-GREEN</span>' : ''}</span><span class="account-meta">${esc(account.accountName || 'Anmeldename unbekannt')} · ${esc(account.steamId)} · ${primeName(account.prime)} · ${healthLabel(account.healthStatus)}</span>${account.loginRequiresReauthentication ? '<span class="account-login-warning">Steam-Login erneut erforderlich</span>' : ''}${account.nextCooldownSeconds ? `<span class="account-next-cooldown">Nächster Cooldown: ${nextCooldownText(account)}</span>` : ''}</span>
+      <span class="account-main"><span class="account-name">${esc(account.personaName || 'Unbekannter Account')} ${account.isPermaGreen ? '<span class="perma-badge">PERMA-GREEN</span>' : ''}</span><span class="account-meta">${esc(account.accountName || 'Anmeldename unbekannt')} · ${esc(account.steamId)} · ${primeName(account.prime)} · ${healthLabel(account.healthStatus)}</span>${account.loginRequiresReauthentication ? '<span class="account-login-warning">Steam-Login erneut erforderlich</span>' : ''}${account.cs2Owned === false ? '<span class="account-login-warning">CS2 nicht im Besitz</span>' : ''}${account.nextCooldownSeconds ? `<span class="account-next-cooldown">Nächster Cooldown: ${nextCooldownText(account)}</span>` : ''}</span>
       <span class="status-pill ${account.loginRequiresReauthentication || sectionName(account.section) !== 'PlayReady' ? 'bad' : ''}">${account.loginRequiresReauthentication ? 'Login nötig' : sectionName(account.section) === 'PlayReady' ? 'Ready' : 'Nicht ready'}</span>
     </button>`).join('') : '<div class="empty">Keine Accounts in dieser Kategorie.</div>';
   document.querySelectorAll('.account-row').forEach(row => row.addEventListener('click', () => selectAccount(row.dataset.id)));
@@ -238,7 +259,7 @@ function renderDetails() {
       <div class="health-grid"><div class="health-card"><small>GC-Verbindung</small><strong>${healthLabel(account.healthStatus)}</strong><span>${formatDate(account.lastCheckUtc || account.statusUpdatedUtc)}</span></div><div class="health-card"><small>Cooldown</small><strong class="${remainingSeconds(account) > 0 ? 'warning-text' : ''}">${cooldownPhase(account)}</strong><span>${duration(account)}</span></div><div class="health-card"><small>Loadout</small><strong>${account.loadoutMismatchCount ?? '—'}</strong><span>${account.loadoutCheckedUtc ? `geprüft ${relativeTime(account.loadoutCheckedUtc)}` : 'noch nicht geprüft'}</span></div></div>
       <div class="stat-grid"><div class="stat"><small>Premier Rating</small><strong>${account.premierRating ?? '—'}</strong></div><div class="stat"><small>CS2 Level</small><strong>${account.cs2Level ?? '—'}</strong></div></div>
       ${renderRatingTrend(account)}
-      <div class="detail-lines"><div class="detail-line"><span>VAC</span><strong>${account.vacBanned === true ? 'Ja' : account.vacBanned === false ? 'Nein' : 'Unbekannt'}</strong></div><div class="detail-line"><span>Cooldown-Ende</span><strong>${formatDate(account.cooldownEndsUtc)}</strong></div>${account.nextCooldownSeconds ? `<div class="detail-line"><span>Nächster Cooldown</span><strong class="next-cooldown-value">${nextCooldownText(account)}</strong></div>` : ''}<div class="detail-line"><span>Nächster GC-Check</span><strong>${formatDate(account.nextCheckUtc)} <span class="muted">(${relativeTime(account.nextCheckUtc)})</span></strong></div><div class="detail-line"><span>Letzter Login</span><strong>${formatDate(account.lastLoginUtc)}</strong></div></div>
+      <div class="detail-lines"><div class="detail-line"><span>Play-Ready-Grund</span><strong>${esc(readinessReason(account))}</strong></div><div class="detail-line"><span>CS2-Besitz</span><strong>${esc(cs2OwnershipText(account))}</strong></div><div class="detail-line"><span>GC-VAC</span><strong>${account.vacBanned === true ? 'Ja' : account.vacBanned === false ? 'Nein' : 'Unbekannt'}</strong></div><div class="detail-line"><span>Steam-Bans</span><strong>${esc(steamBanText(account))}</strong></div><div class="detail-line"><span>Cooldown-Ende</span><strong>${formatDate(account.cooldownEndsUtc)}</strong></div>${account.nextCooldownSeconds ? `<div class="detail-line"><span>Nächster Cooldown</span><strong class="next-cooldown-value">${nextCooldownText(account)}</strong></div>` : ''}<div class="detail-line"><span>Nächster GC-Check</span><strong>${formatDate(account.nextCheckUtc)} <span class="muted">(${relativeTime(account.nextCheckUtc)})</span></strong></div><div class="detail-line"><span>Letzter Login</span><strong>${formatDate(account.lastLoginUtc)}</strong></div></div>
       <div class="note-row"><input id="noteInput" value="${esc(account.note || '')}" placeholder="Notiz..."><button id="saveNote">Speichern</button></div>
       <div class="detail-actions"><button id="refreshLoginButton" class="primary-action">Login aktualisieren</button><button data-command="RefreshStatus">Status aktualisieren</button><button data-command="SyncLoadout">Loadout prüfen</button><button data-command="ClearWorkshop">Workshop leeren</button><button data-command="ApplyLoadout">Loadout anwenden</button><button data-command="Personalize">Personalize</button><button id="permaGreenButton" class="perma-action">${account.isPermaGreen ? 'Perma-Green entfernen' : 'Als Perma-Green markieren'}</button><button id="monitoringButton" class="monitoring-action">${account.monitoringPaused ? 'Checks fortsetzen' : 'Spielmodus aktivieren'}</button><button id="deleteAccountButton" class="danger-action">Account aus System löschen</button></div>
       ${renderRecentMatches(account)}

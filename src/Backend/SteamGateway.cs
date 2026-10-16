@@ -10,6 +10,7 @@ internal sealed class SteamGateway : ISteamAccountGateway
     private readonly SteamCredentialsAuthService _auth = new();
     private readonly CsPremierScoreService _status;
     private readonly SteamPrimeStatusService _prime = new();
+    private readonly SteamGameOwnershipService _ownership = new();
     private readonly CsLoadoutService _loadout = new();
     private readonly CsMatchHistoryService _matches = new();
     private readonly SteamWorkshopService _workshop = new();
@@ -40,6 +41,9 @@ internal sealed class SteamGateway : ISteamAccountGateway
 
     public Task<AccountPrimeBucket> QueryPrimeAsync(string refreshToken, string steamId, CsPremierScoreResult status, CancellationToken cancellationToken) =>
         _prime.QueryAsync(refreshToken, steamId, status, cancellationToken);
+
+    public Task<SteamGameOwnershipSnapshot?> QueryOwnershipAsync(string refreshToken, string steamId, CancellationToken cancellationToken) =>
+        _ownership.QueryAsync(refreshToken, steamId, cancellationToken);
 
     public async Task<SteamProfileSnapshot?> QueryProfileAsync(string steamId, CancellationToken cancellationToken)
     {
