@@ -37,6 +37,13 @@ test('authenticator codes are live with an expiry countdown instead of a fetch b
   expect(appSource).not.toContain('data-authenticator-code');
 });
 
+test('MAFiles can be imported in one bulk upload', () => {
+  expect(backendSource).toContain('file.Name, "maFile"');
+  expect(storeSource).toContain('ImportMany');
+  expect(appSource).toContain('Array.from(input.files || [])');
+  expect(htmlSource).toContain('multiple');
+});
+
 test('the upstream licensing and scope are documented', () => {
   expect(noticesSource).toContain('https://github.com/geel9/SteamAuth');
   expect(noticesSource).toContain('Only the shared-secret-based code-generation algorithm is used.');

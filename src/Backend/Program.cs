@@ -300,23 +300,45 @@ app.MapPost("/api/authenticators/import", async (HttpRequest request, SteamAuthe
     }
 
     var form = await request.ReadFormAsync(cancellationToken);
-    var file = form.Files.GetFile("maFile");
-    if (file is null || file.Length == 0)
+    var files = form.Files
+        .Where(file => string.Equals(file.Name, "maFile", StringComparison.Ordinal) && file.Length > 0)
+        .ToArray();
+    if (files.Length == 0)
     {
         return Results.BadRequest(new { message = "Keine MAFile ausgewählt." });
     }
 
-    if (file.Length > 256 * 1024)
+    if (files.Length > 100)
     {
-        return Results.BadRequest(new { message = "Die MAFile ist zu groß." });
+        return Results.BadRequest(new { message = "Maximal 100 MAFiles pro Upload." });
+    }
+
+    if (files.Any(file => file.Length > 256 * 1024))
+    {
+        return Results.BadRequest(new { message = "Eine MAFile ist zu groß. Das Limit pro Datei beträgt 256 KiB." });
+    }
+
+    if (files.Sum(file => file.Length) > 3 * 1024 * 1024)
+    {
+        return Results.BadRequest(new { message = "Der gesamte Upload ist zu groß. Das Limit beträgt 3 MiB." });
     }
 
     try
     {
-        using var reader = new StreamReader(file.OpenReadStream(), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
-        var json = await reader.ReadToEndAsync(cancellationToken);
-        var result = authenticators.Import(json);
-        return Results.Ok(new { id = result.Id, accountName = result.AccountName, updated = result.Updated });
+        var jsonFiles = new List<string>(files.Length);
+        foreach (var file in files)
+        {
+            using var reader = new StreamReader(file.OpenReadStream(), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            jsonFiles.Add(await reader.ReadToEndAsync(cancellationToken));
+        }
+
+        var results = authenticators.ImportMany(jsonFiles);
+        return Results.Ok(new
+        {
+            importedCount = results.Count(result => !result.Updated),
+            updatedCount = results.Count(result => result.Updated),
+            entries = results.Select(result => new { id = result.Id, accountName = result.AccountName, updated = result.Updated }),
+        });
     }
     catch (JsonException)
     {

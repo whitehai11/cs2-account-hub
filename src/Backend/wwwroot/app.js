@@ -401,18 +401,20 @@ async function refreshAuthenticatorCode(id) {
 
 async function importAuthenticator() {
   const input = $('authenticatorFile');
-  const file = input.files?.[0];
-  if (!file) { toast('Bitte zuerst eine MAFile auswählen.', true); return; }
-  setButtonBusy('importAuthenticatorButton', true, 'Importiere ...');
+  const files = Array.from(input.files || []);
+  if (!files.length) { toast('Bitte zuerst mindestens eine MAFile auswählen.', true); return; }
+  setButtonBusy('importAuthenticatorButton', true, files.length === 1 ? 'Importiere ...' : `${files.length} MAFiles ...`);
   try {
     const form = new FormData();
-    form.append('maFile', file, file.name);
+    files.forEach(file => form.append('maFile', file, file.name));
     const result = await api('/api/authenticators/import', { method: 'POST', body: form });
     input.value = '';
     await loadAuthenticators();
-    toast(result.updated ? 'MAFile aktualisiert.' : 'MAFile sicher importiert.');
+    const imported = Number(result.importedCount) || 0;
+    const updated = Number(result.updatedCount) || 0;
+    toast(`${imported} importiert${updated ? `, ${updated} aktualisiert` : ''}.`);
   } catch (error) { toast(error.message, true); }
-  finally { setButtonBusy('importAuthenticatorButton', false, 'MAFile importieren'); }
+  finally { setButtonBusy('importAuthenticatorButton', false, 'MAFiles importieren'); }
 }
 
 async function deleteAuthenticator(id) {

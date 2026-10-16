@@ -56,41 +56,59 @@ internal sealed class SteamAuthenticatorStore
         }
     }
 
-    public SteamAuthenticatorImportResult Import(string json)
+    public SteamAuthenticatorImportResult Import(string json) => ImportMany([json]).Single();
+
+    public IReadOnlyList<SteamAuthenticatorImportResult> ImportMany(IReadOnlyList<string> jsonFiles)
+    {
+        if (jsonFiles.Count == 0) throw new FormatException("Keine MAFile ausgewählt.");
+        var maFiles = jsonFiles.Select(Parse).ToArray();
+
+        lock (_gate)
+        {
+            var results = new List<SteamAuthenticatorImportResult>(maFiles.Length);
+            foreach (var maFile in maFiles)
+            {
+                var accountName = maFile.AccountName!;
+                var record = _authenticators.Values.FirstOrDefault(item =>
+                    string.Equals(Normalize(item.AccountName), Normalize(accountName), StringComparison.OrdinalIgnoreCase));
+                var updated = record is not null;
+                record ??= new SteamAuthenticatorRecord { Id = Guid.NewGuid() };
+                record.AccountName = accountName;
+                record.ProtectedSharedSecret = _secrets.Protect(maFile.SharedSecret!);
+                record.ImportedUtc = DateTimeOffset.UtcNow;
+                _authenticators[record.Id] = record;
+                results.Add(new SteamAuthenticatorImportResult(record.Id, accountName, updated));
+            }
+            SaveUnsafe();
+            return results;
+        }
+    }
+
+    private static SteamMaFile Parse(string json)
     {
         if (Encoding.UTF8.GetByteCount(json) > MaxFileBytes)
         {
-            throw new FormatException("Die MAFile ist zu groß.");
+            throw new FormatException("Eine MAFile ist zu groß.");
         }
 
         var maFile = JsonSerializer.Deserialize<SteamMaFile>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web))
-            ?? throw new FormatException("Die MAFile ist leer oder ungültig.");
+            ?? throw new FormatException("Eine MAFile ist leer oder ungültig.");
         var accountName = maFile.AccountName?.Trim();
         var sharedSecret = maFile.SharedSecret?.Trim();
 
         if (string.IsNullOrWhiteSpace(accountName) || accountName.Length > 128)
         {
-            throw new FormatException("Die MAFile enthält keinen gültigen Steam-Anmeldenamen.");
+            throw new FormatException("Eine MAFile enthält keinen gültigen Steam-Anmeldenamen.");
         }
 
         if (string.IsNullOrWhiteSpace(sharedSecret) || !IsValidSharedSecret(sharedSecret))
         {
-            throw new FormatException("Die MAFile enthält keinen gültigen Shared Secret.");
+            throw new FormatException("Eine MAFile enthält keinen gültigen Shared Secret.");
         }
 
-        lock (_gate)
-        {
-            var record = _authenticators.Values.FirstOrDefault(item =>
-                string.Equals(Normalize(item.AccountName), Normalize(accountName), StringComparison.OrdinalIgnoreCase));
-            var updated = record is not null;
-            record ??= new SteamAuthenticatorRecord { Id = Guid.NewGuid() };
-            record.AccountName = accountName;
-            record.ProtectedSharedSecret = _secrets.Protect(sharedSecret);
-            record.ImportedUtc = DateTimeOffset.UtcNow;
-            _authenticators[record.Id] = record;
-            SaveUnsafe();
-            return new SteamAuthenticatorImportResult(record.Id, accountName, updated);
-        }
+        maFile.AccountName = accountName;
+        maFile.SharedSecret = sharedSecret;
+        return maFile;
     }
 
     public async Task<SteamAuthenticatorCodeDto?> GenerateCodeAsync(Guid id, CancellationToken cancellationToken)
