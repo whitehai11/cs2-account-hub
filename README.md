@@ -1,5 +1,7 @@
 # CS2 Account Hub
 
+Current release: `0.2.0`
+
 Server-first CS2 account dashboard for Ubuntu/Docker with a browser frontend.
 
 The server owns the dashboard login, Steam authentication, Steam Guard code flow, CS2 Game Coordinator status queries, Prime classification, cooldown/VAC sorting, Loadout, Personalize and Workshop actions. The browser is the frontend; Steam credentials and Guard codes are entered there and handled server-side in memory. No Steam desktop client or AutoExec component is required.
@@ -68,6 +70,6 @@ The dashboard also includes an optional global Steam Mail inbox. It uses IMAP ov
 
 ## CI and releases
 
-Every push and pull request builds the backend, Windows bridge and desktop client. Pushing a tag such as `v0.1.0` creates a GitHub Release containing self-contained Windows desktop/bridge archives and a compressed Docker image archive for the backend.
+Every push and pull request builds the backend, Windows bridge and desktop client. Pushing a version tag such as `v0.2.0` creates a GitHub Release containing self-contained Windows desktop/bridge archives and a compressed Docker image archive for the backend. See [CHANGELOG.md](CHANGELOG.md) for the release history.
 
 The Steam/CS2 adapter is based on the MIT-licensed `fakearchie/nfatool` reference. See `THIRD_PARTY_NOTICES.md` for attribution.
