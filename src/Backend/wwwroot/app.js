@@ -371,7 +371,6 @@ async function importAuthenticator() {
   const input = $('authenticatorFile');
   const file = input.files?.[0];
   if (!file) { toast('Bitte zuerst eine MAFile auswählen.', true); return; }
-  const button = $('importAuthenticatorButton');
   setButtonBusy('importAuthenticatorButton', true, 'Importiere ...');
   try {
     const form = new FormData();
