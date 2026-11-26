@@ -135,7 +135,7 @@ function accountAttention(account) {
 }
 function signalTitle(item) { return item?.title || 'Ereignis'; }
 function mailSenderLabel(sender) { return sender?.replace(/^.*</, '').replace(/>$/, '') || 'Steam'; }
-function showLogin() { clearAuthenticatorTimers(); $('appView').classList.add('hidden'); $('loginView').classList.remove('hidden'); setButtonBusy('dashboardLoginButton', false, 'Dashboard öffnen'); }
+function showLogin() { clearAuthenticatorTimers(); $('appView').classList.add('hidden'); $('loginView').classList.remove('hidden'); setButtonBusy('dashboardLoginButton', false, 'Anmelden'); }
 function showApp(username) { $('loginView').classList.add('hidden'); $('appView').classList.remove('hidden'); $('userLabel').textContent = username || ''; }
 function toast(message, bad = false) { const el = $('toast'); el.textContent = message; el.classList.remove('hidden'); el.style.background = bad ? '#a52318' : '#17324d'; setTimeout(() => el.classList.add('hidden'), 4500); }
 function setButtonBusy(id, busy, label) { const button = $(id); if (!button) return; button.disabled = busy; button.querySelector('.button-spinner')?.classList.toggle('hidden', !busy); const text = button.querySelector('.button-text'); if (text && label) text.textContent = label; }
@@ -179,8 +179,8 @@ function setView(view) {
   $('signalBar').classList.toggle('hidden', settings || mail || authenticator || timeline || exportView);
   $('loadoutSettings').classList.toggle('hidden', view !== 'loadout');
   $('personalizeSettings').classList.toggle('hidden', view !== 'personalize');
-  const titles = { control: ['Mission Control', 'Alle Accounts. Alle Signale. Ein klarer nächster Schritt.'], play: ['Play Ready', 'Accounts ohne aktiven Cooldown oder VAC'], notplay: ['Not Play Ready', 'Accounts mit Cooldown oder unbekanntem Status'], vac: ['VAC-Ban', 'Accounts mit erkanntem VAC-Ban'], mail: ['Steam Mail', 'Globaler Steam-Posteingang ohne Account-Zuordnung'], authenticator: ['Steam Authenticator', 'MAFile-gestützte Steam-Guard-Codes mit Account-Abgleich'], timeline: ['Timeline', 'Die Historie deiner Account-Flotte'], export: ['Export & Backup', 'Daten mitnehmen. Secrets geschützt sichern.'], loadout: ['Loadout', 'Serverseitige Presets und Synchronisierung'], personalize: ['Personalize', 'Profil-Presets und Account-Profil'] };
-  $('pageTitle').textContent = titles[view][0]; $('pageSubtitle').textContent = titles[view][1];
+  const titles = { control: ['Übersicht', 'Status deiner Steam-Accounts.'], play: ['Bereit', 'Accounts ohne aktiven Cooldown oder VAC-Ban.'], notplay: ['Nicht bereit', 'Accounts mit Cooldown oder ungeklärtem Status.'], vac: ['VAC-Bans', 'Accounts mit erkanntem VAC-Ban.'], mail: ['Steam Mail', 'Nachrichten aus deinen verbundenen Postfächern.'], authenticator: ['Steam Guard', 'Codes aus deinen verknüpften MAFiles.'], timeline: ['Verlauf', 'Statusänderungen und Aktionen deiner Accounts.'], export: ['Daten sichern', 'Status exportieren oder den Hub sichern.'], loadout: ['Loadout', 'Waffen-Presets verwalten.'], personalize: ['Profil bearbeiten', 'Profilangaben für deine Accounts speichern.'] };
+  $('pageKicker').textContent = titles[view][0].toLocaleUpperCase('de-DE'); $('pageTitle').textContent = titles[view][0]; $('pageSubtitle').textContent = titles[view][1];
   const animatedView = control ? $('controlView') : mail ? $('mailView') : authenticator ? $('authenticatorView') : timeline ? $('timelineView') : exportView ? $('exportView') : settings ? $('settingsView') : $('accountsView'); animatedView.classList.remove('view-enter'); requestAnimationFrame(() => animatedView.classList.add('view-enter'));
   if (control) loadControl(); else if (mail) loadMail(); else if (authenticator) loadAuthenticators(); else if (timeline) loadTimeline(); else if (exportView) { /* downloads are explicit actions */ } else if (settings) loadSettings(); else loadAccounts();
 }
@@ -196,8 +196,8 @@ function renderControl() {
   const attention = state.allAccounts.filter(account => accountAttention(account));
   const visible = state.focusMode ? attention : attention.slice(0, 8);
   $('attentionCount').textContent = `${attention.length} offen`;
-  $('focusButton').textContent = state.focusMode ? 'Fleet anzeigen' : 'Nur Aufmerksamkeit';
-  $('attentionList').innerHTML = visible.length ? visible.map(account => { const item = accountAttention(account); return `<button class="attention-row ${item[0]}" data-account-id="${account.id}"><span class="attention-icon">${item[0] === 'critical' ? '!' : item[0] === 'warning' ? '◷' : '·'}</span><span class="attention-main"><strong>${esc(account.personaName || account.steamId)}</strong><small>${esc(item[1])} · ${esc(item[2])}</small></span><span class="attention-arrow">→</span></button>`; }).join('') : '<div class="control-empty"><strong>Fleet ist ruhig</strong><span>Aktuell braucht kein Account deine Aufmerksamkeit.</span></div>';
+  $('focusButton').textContent = state.focusMode ? 'Alle Accounts anzeigen' : 'Hinweise anzeigen';
+  $('attentionList').innerHTML = visible.length ? visible.map(account => { const item = accountAttention(account); return `<button class="attention-row ${item[0]}" data-account-id="${account.id}"><span class="attention-icon">${item[0] === 'critical' ? '!' : item[0] === 'warning' ? '◷' : '·'}</span><span class="attention-main"><strong>${esc(account.personaName || account.steamId)}</strong><small>${esc(item[1])} · ${esc(item[2])}</small></span><span class="attention-arrow">→</span></button>`; }).join('') : '<div class="control-empty"><strong>Alles in Ordnung</strong><span>Kein Account braucht gerade deine Aufmerksamkeit.</span></div>';
   $('controlSignals').innerHTML = state.timeline.length ? state.timeline.slice(0, 8).map(item => `<button class="control-signal ${esc(item.severity || 'info')}" data-account-id="${item.accountId}"><span class="timeline-icon">${timelineIcon(item.type)}</span><span><strong>${esc(signalTitle(item))}</strong><small>${esc(item.personaName || item.steamId)} · ${esc(relativeTime(item.occurredUtc))}</small></span><span class="control-signal-arrow">→</span></button>`).join('') : '<div class="control-empty"><strong>Noch keine Signale</strong><span>Scheduler-Checks und Aktionen erscheinen hier.</span></div>';
   document.querySelectorAll('[data-account-id]').forEach(button => button.addEventListener('click', () => { const account = state.allAccounts.find(item => item.id === button.dataset.accountId); setView(account && sectionName(account.section) === 'VacBanned' ? 'vac' : account && sectionName(account.section) === 'NotPlayReady' ? 'notplay' : 'play'); selectAccount(button.dataset.accountId); }));
 }
@@ -641,7 +641,7 @@ function openAuthDialog(account = null) {
   state.authAccountId = account?.id || null;
   $('addAccountForm').reset();
   $('steamUsername').value = account?.accountName || '';
-  $('authDialogKicker').textContent = account ? 'LOGIN REFRESH' : 'ACCOUNT ENROLLMENT';
+  $('authDialogKicker').textContent = account ? 'LOGIN AKTUALISIEREN' : 'ACCOUNT HINZUFÜGEN';
   $('authDialogTitle').textContent = account ? 'Steam-Login aktualisieren' : 'Steam-Account verbinden';
   $('authDialogDescription').textContent = account
     ? 'Der bestehende Account bleibt erhalten. Nur das Steam-Login und der Refresh-Token werden aktualisiert; danach wird der Status neu geladen.'
@@ -674,7 +674,7 @@ async function pollAuth() {
 async function submitGuard() { if (!state.authSession) return; try { await api(`/api/auth/sessions/${state.authSession}/code`, { method: 'POST', body: JSON.stringify({ code: $('guardCode').value }) }); $('guardCode').value = ''; $('authMessage').textContent = 'Code übermittelt ...'; } catch (error) { toast(error.message, true); } }
 async function checkSession() { try { const me = await api('/api/web/me'); showApp(me.username); await loadSettings(); await loadControl(); } catch { showLogin(); } }
 
-$('loginForm').addEventListener('submit', async event => { event.preventDefault(); setButtonBusy('dashboardLoginButton', true, 'Anmeldung läuft ...'); $('loginError').textContent = ''; try { const me = await api('/api/web/login', { method: 'POST', body: JSON.stringify({ username: $('loginUsername').value, password: $('loginPassword').value }) }); $('loginPassword').value = ''; showApp(me.username); await loadSettings(); await loadControl(); } catch (error) { $('loginError').textContent = error.message; setButtonBusy('dashboardLoginButton', false, 'Dashboard öffnen'); } });
+$('loginForm').addEventListener('submit', async event => { event.preventDefault(); setButtonBusy('dashboardLoginButton', true, 'Anmeldung läuft ...'); $('loginError').textContent = ''; try { const me = await api('/api/web/login', { method: 'POST', body: JSON.stringify({ username: $('loginUsername').value, password: $('loginPassword').value }) }); $('loginPassword').value = ''; showApp(me.username); await loadSettings(); await loadControl(); } catch (error) { $('loginError').textContent = error.message; setButtonBusy('dashboardLoginButton', false, 'Anmelden'); } });
 document.querySelectorAll('.nav-item').forEach(item => item.addEventListener('click', () => setView(item.dataset.view)));
 $('refreshButton').addEventListener('click', () => state.view === 'play' || state.view === 'notplay' || state.view === 'vac' ? loadAccounts() : state.view === 'control' ? loadControl() : state.view === 'mail' ? loadMail() : state.view === 'authenticator' ? loadAuthenticators() : state.view === 'timeline' ? loadTimeline() : state.view === 'export' ? null : loadSettings());
 $('primeFilter').addEventListener('change', loadAccounts); $('accountSearch').addEventListener('input', renderAccounts);
